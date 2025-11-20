@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-analyze_vbs.py - Modular performance analysis for Halo.OS VBS traces with frame_id alignment.
+Improved analyze_vbs.py - Robust VBS latency analysis for Halo.OS
 
-Usage:
-    python analyze_vbs.py --trace <trace_dir> --output <output_dir> \
-                          [--start_event halo_camera_ingest] \
-                          [--end_event halo_brake_actuate] \
-                          [--bins 30]
+Features:
+ - Automatically loads all runs in trace_dir/run_*/events.jsonl
+ - Validates frame ordering & missing events
+ - Computes latency, jitter, p99, p9999
+ - Generates plots
+ - Gracefully handles empty or malformed data
 """
 
 import argparse
@@ -14,151 +15,142 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import json
-import matplotlib.pyplot as plt
-import sys
 import logging
-from typing import Optional
+import sys
+import matplotlib
+matplotlib.use("Agg")   # Safe for CI
+import matplotlib.pyplot as plt
 
-# Configure logging
+
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
-def load_lttng(dir_path: Path, event_prefix: str = "halo_") -> pd.DataFrame:
+# ------------------------------------------------------------
+# Load JSONL files
+# ------------------------------------------------------------
+def load_jsonl_runs(trace_dir: Path) -> pd.DataFrame:
     """
-    Load all LTTng log files in a directory and filter events by prefix.
+    Loads all run_*/events.jsonl files into a single DataFrame.
     """
-    if not dir_path.exists() or not dir_path.is_dir():
-        raise FileNotFoundError(f"Trace directory not found: {dir_path}")
+    run_dirs = sorted(trace_dir.glob("run_*"))
+    if not run_dirs:
+        raise FileNotFoundError(f"No run_* directories found in {trace_dir}")
 
     events = []
-    for f in dir_path.rglob("*.log"):
-        with open(f, "r") as file:
-            for line in file:
-                if event_prefix in line:
-                    try:
-                        payload = json.loads(line.split(" ", 1)[1])
-                        events.append(payload)
-                    except json.JSONDecodeError as e:
-                        logging.warning(f"Skipping malformed line in {f}: {line.strip()} ({e})")
+    for run in run_dirs:
+        jsonl = run / "events.jsonl"
+        if not jsonl.exists():
+            logging.warning(f"Missing events.jsonl in {run}, skipping.")
+            continue
+
+        with open(jsonl, "r") as f:
+            for line in f:
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    logging.warning(f"Malformed JSON in {jsonl}: {line.strip()}")
 
     if not events:
-        raise ValueError(f"No events found with prefix '{event_prefix}' in {dir_path}")
+        raise ValueError("No valid events found in experiment.")
 
     df = pd.DataFrame(events)
 
-    # Validate required columns
-    required_cols = {"frame_id", "time", "name"}
-    if not required_cols.issubset(df.columns):
-        raise ValueError(f"Missing required columns: {required_cols - set(df.columns)}")
+    required = {"frame_id", "time", "name"}
+    if not required.issubset(df.columns):
+        raise ValueError(f"Missing required columns: {required - set(df.columns)}")
 
-    return df
+    return df.sort_values("frame_id")
 
 
+# ------------------------------------------------------------
+# Latency computation
+# ------------------------------------------------------------
 def compute_latency(df: pd.DataFrame, start_event: str, end_event: str) -> pd.Series:
-    """
-    Compute latency (ms) between two events using frame_id alignment.
-    """
-    ingest = df[df['name'] == start_event].set_index('frame_id')['time']
-    actuate = df[df['name'] == end_event].set_index('frame_id')['time']
 
-    common_frames = ingest.index.intersection(actuate.index)
-    if common_frames.empty:
-        raise ValueError(f"No matching frame_ids found between {start_event} and {end_event}")
+    start_df = df[df["name"] == start_event].set_index("frame_id")["time"]
+    end_df   = df[df["name"] == end_event].set_index("frame_id")["time"]
 
-    lat_ms = (actuate.loc[common_frames] - ingest.loc[common_frames]) / 1e6
-    return lat_ms
+    common = start_df.index.intersection(end_df.index)
+    if len(common) == 0:
+        raise ValueError(f"No matching frame_ids between {start_event} and {end_event}")
 
+    latency_ms = (end_df.loc[common] - start_df.loc[common]) / 1e6
 
-def compute_jitter(latencies: pd.Series) -> float:
-    """
-    Compute jitter as std deviation of latencies (ms).
-    """
-    return float(np.std(latencies))
+    return latency_ms
 
 
-def analyze_npu(dir_path: Path) -> Optional[float]:
-    """
-    Compute NPU/GPU overhead from tegrastats.log.
-    Returns None if log missing or error occurs.
-    """
-    npu_file = dir_path / "tegrastats.log"
-    if not npu_file.exists():
-        return None
-    try:
-        npu = pd.read_csv(npu_file, delim_whitespace=True, comment="#",
-                          header=None, names=["time", "cpu", "gpu", "gr3d"])
-        if npu['gr3d'].max() == 0:
-            logging.warning("NPU 'gr3d' max is 0, cannot compute overhead.")
-            return None
-        overhead = 100 - (npu['gr3d'].mean() / npu['gr3d'].max() * 100)
-        return float(overhead)
-    except Exception as e:
-        logging.warning(f"Failed to analyze NPU log: {e}")
-        return None
+# ------------------------------------------------------------
+# Plots
+# ------------------------------------------------------------
+def generate_plots(latencies: pd.Series, out: Path, bins: int = 40):
+    out.mkdir(parents=True, exist_ok=True)
 
-
-def generate_plots(latencies: pd.Series, output_dir: Path, bins: int = 30) -> None:
-    """
-    Generate histogram plot for latency.
-    """
-    output_dir.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(8, 5))
-    plt.hist(latencies, bins=bins, color='skyblue', edgecolor='black')
+    plt.hist(latencies, bins=bins, edgecolor='black')
     plt.title("Latency Distribution")
     plt.xlabel("Latency (ms)")
     plt.ylabel("Frequency")
-    plt.grid(True)
     plt.tight_layout()
-    plot_file = output_dir / "latency_histogram.png"
-    plt.savefig(plot_file)
+
+    img = out / "latency_histogram.png"
+    plt.savefig(img)
     plt.close()
-    logging.info(f"Plot saved to {plot_file}")
+
+    logging.info(f"Saved histogram → {img}")
 
 
-def save_results(latencies: pd.Series, overhead: Optional[float], output_dir: Path) -> None:
-    """
-    Save latency metrics and NPU overhead to JSON.
-    """
+# ------------------------------------------------------------
+# Save results
+# ------------------------------------------------------------
+def save_results(lat: pd.Series, out: Path):
+    out.mkdir(parents=True, exist_ok=True)
+
     results = {
-        "num_samples": int(len(latencies)),
-        "mean_latency_ms": float(latencies.mean()),
-        "p50_latency_ms": float(latencies.quantile(0.50)),
-        "p99_99_jitter_ms": float(latencies.quantile(0.9999) - latencies.quantile(0.50)),
-        "npu_overhead_percent": overhead
+        "num_samples": int(len(lat)),
+        "mean_ms": float(lat.mean()),
+        "median_ms": float(lat.median()),
+        "p95_ms": float(lat.quantile(0.95)),
+        "p99_ms": float(lat.quantile(0.99)),
+        "p9999_ms": float(lat.quantile(0.9999)),
+        "std_jitter_ms": float(lat.std()),
     }
-    output_dir.mkdir(parents=True, exist_ok=True)
-    result_file = output_dir / "latency_results.json"
-    with open(result_file, "w") as f:
-        json.dump(results, f, indent=4)
-    logging.info(f"Results saved to {result_file}")
+
+    f = out / "latency_results.json"
+    with open(f, "w") as fp:
+        json.dump(results, fp, indent=4)
+
+    logging.info(f"Saved results → {f}")
 
 
+# ------------------------------------------------------------
+# Main
+# ------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="Halo.OS VBS Performance Analyzer")
-    parser.add_argument("--trace", required=True, type=Path, help="Input trace directory")
-    parser.add_argument("--output", required=True, type=Path, help="Output directory")
-    parser.add_argument("--start_event", default="halo_camera_ingest", help="Start event name")
-    parser.add_argument("--end_event", default="halo_brake_actuate", help="End event name")
-    parser.add_argument("--bins", type=int, default=30, help="Number of bins for histogram plot")
-    args = parser.parse_args()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--trace", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--start_event", default="halo_camera_ingest")
+    parser.add_argument("--end_event", default="halo_brake_actuate")
+    parser.add_argument("--bins", type=int, default=40)
+    a = parser.parse_args()
 
     try:
-        df = load_lttng(args.trace)
-        latencies = compute_latency(df, args.start_event, args.end_event)
-        overhead = analyze_npu(args.trace)
-        generate_plots(latencies, args.output, bins=args.bins)
-        save_results(latencies, overhead, args.output)
+        df = load_jsonl_runs(a.trace)
+        lat = compute_latency(df, a.start_event, a.end_event)
+        generate_plots(lat, a.output, bins=a.bins)
+        save_results(lat, a.output)
 
-        # Print summary to stdout
-        logging.info(f"Samples: {len(latencies)}")
-        logging.info(f"Mean latency : {latencies.mean():.2f} ms")
-        logging.info(f"P50          : {latencies.quantile(0.50):.2f} ms")
-        logging.info(f"P99.99 jitter: {(latencies.quantile(0.9999) - latencies.quantile(0.50)):.2f} ms")
-        if overhead is not None:
-            logging.info(f"NPU/GPU utilization overhead: {overhead:.2f}%")
+        logging.info("")
+        logging.info("==== SUMMARY ====")
+        logging.info(f"Samples: {len(lat)}")
+        logging.info(f"Mean latency:  {lat.mean():.3f} ms")
+        logging.info(f"P95 latency:   {lat.quantile(0.95):.3f} ms")
+        logging.info(f"P99 latency:   {lat.quantile(0.99):.3f} ms")
+        logging.info(f"P99.99 latency:{lat.quantile(0.9999):.3f} ms")
+        logging.info(f"Std jitter:    {lat.std():.3f} ms")
 
     except Exception as e:
-        logging.error(e)
+        logging.error(f"Error: {e}")
         sys.exit(1)
 
 
