@@ -6,15 +6,15 @@ echo "=== Building instrumented Halo.OS demo ==="
 # Use WORKSPACE env variable or default to current directory
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 MANIFEST_DIR="$WORKSPACE/manifests"
-MANIFEST_FILE="$MANIFEST_DIR/default.xml"
+MANIFEST_FILE="$MANIFEST_DIR/manifest_20250825.xml"
 
 # Create manifests directory if missing
 mkdir -p "$MANIFEST_DIR"
 
-# Download the default manifest if it doesn't exist
+# Download the manifest if it doesn't exist
 if [ ! -f "$MANIFEST_FILE" ]; then
-    echo "Downloading default.xml from Halo.OS manifest repo..."
-    curl -L -o "$MANIFEST_FILE" "https://gitee.com/haloos/manifests/raw/main/default.xml"
+    echo "Downloading manifest_20250825.xml from Gitee..."
+    curl -L -o "$MANIFEST_FILE" "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
 fi
 
 # Initialize repo inside WORKSPACE
@@ -22,13 +22,7 @@ REPO_DIR="$WORKSPACE/repo"
 mkdir -p "$REPO_DIR"
 cd "$REPO_DIR"
 
-# Make sure 'repo' is installed
-if ! command -v repo &> /dev/null; then
-    echo "❌ ERROR: 'repo' command not found. Please install repo first."
-    exit 1
-fi
-
-repo init -u https://gitee.com/haloos/manifests.git -m "$MANIFEST_FILE" --repo-dir="$REPO_DIR" --quiet
+repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE" --quiet
 repo sync --force-sync --quiet
 
 # Build instrumented demo
@@ -39,5 +33,19 @@ cd "$BUILD_DIR"
 
 # Select toolchain
 if [ -f "$WORKSPACE/toolchains/jetson.cmake" ]; then
-    TOOLCHAIN_FILE="$WORKSPACE/toolchains/jetson.cm_
+    TOOLCHAIN_FILE="$WORKSPACE/toolchains/jetson.cmake"
+    echo "Using Jetson toolchain"
+elif [ -f "$WORKSPACE/toolchains/host.cmake" ]; then
+    TOOLCHAIN_FILE="$WORKSPACE/toolchains/host.cmake"
+    echo "Using host/x86 toolchain"
+else
+    echo "No toolchain file found. Please add one to $WORKSPACE/toolchains/"
+    exit 1
+fi
+
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
+make -j"$(nproc)"
+
+echo "=== Build complete ==="
+echo "Executable located at $BUILD_DIR/rt_demo"
 
