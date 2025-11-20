@@ -1,44 +1,138 @@
 #!/usr/bin/env python3
-import pandas as pd
-import sys
-from pathlib import Path
+"""
+analyze_vbs.py - Modular performance analysis for Halo.OS VBS traces.
+
+This script parses LTTng trace data, computes latency and jitter metrics,
+and generates reports/plots for analysis.
+
+Usage:
+    python analyze_vbs.py --input sample_events.jsonl --output results/
+"""
+
+import argparse
 import json
+import os
+from typing import List, Dict, Tuple
+import matplotlib.pyplot as plt
+import numpy as np
 
-def load_lttng(dir_path):
+
+def parse_trace(file_path: str) -> List[Dict]:
+    """
+    Parse a JSONL trace file into a list of events.
+
+    Args:
+        file_path (str): Path to JSONL trace file.
+
+    Returns:
+        List[Dict]: List of event dictionaries.
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Trace file not found: {file_path}")
+    
     events = []
-    for f in Path(dir_path).rglob("*.log"):
-        with open(f) as fp:
-            for line in fp:
-                if "halo_" in line:
-                    try:
-                        payload = json.loads(line.split(" ", 1)[1])
-                        events.append(payload)
-                    except:
-                        continue
-    return pd.DataFrame(events)
+    with open(file_path, 'r') as f:
+        for line in f:
+            events.append(json.loads(line.strip()))
+    return events
 
-if len(sys.argv) < 2:
-    print("Usage: python analyze.py <path_to_events.jsonl>")
-    sys.exit(1)
 
-trace_dir = sys.argv[1]
-df = load_lttng(trace_dir)
+def compute_latency(events: List[Dict], start_event: str, end_event: str) -> List[float]:
+    """
+    Compute latency between two types of events.
 
-# End-to-end latency: camera -> brake
-ingest = df[df['name'] == 'halo_camera_ingest'].set_index('frame_id')['time']
-actuate = df[df['name'] == 'halo_brake_actuate'].set_index('frame_id')['time']
-lat_ms = (actuate - ingest) / 1e6  # convert ns to ms
+    Args:
+        events (List[Dict]): Parsed event list.
+        start_event (str): Name of the start event.
+        end_event (str): Name of the end event.
 
-print(f"Samples: {len(lat_ms)}")
-print(f"Mean latency : {lat_ms.mean():.2f} ms")
-print(f"p50          : {lat_ms.quantile(0.50):.2f} ms")
-print(f"p99.99 jitter: {(lat_ms.quantile(0.9999) - lat_ms.quantile(0.50)):.2f} ms")
+    Returns:
+        List[float]: Latencies in milliseconds.
+    """
+    start_times = [e['timestamp'] for e in events if e['name'] == start_event]
+    end_times = [e['timestamp'] for e in events if e['name'] == end_event]
 
-# Optional: NPU virtualization overhead analysis
-npu_bare_file = Path(trace_dir) / "npu_bare.log"
-npu_shared_file = Path(trace_dir) / "npu_shared.log"
-if npu_bare_file.exists() and npu_shared_file.exists():
-    npu_bare = pd.read_csv(npu_bare_file, delim_whitespace=True)
-    npu_shared = pd.read_csv(npu_shared_file, delim_whitespace=True)
-    overhead = (npu_bare['GR3D_FREQ'].mean() - npu_shared['GR3D_FREQ'].mean()) / npu_bare['GR3D_FREQ'].mean() * 100
-    print(f"NPU virtualization overhead: {overhead:.1f}%")
+    if len(start_times) != len(end_times):
+        raise ValueError("Mismatch in number of start/end events")
+    
+    latencies = [(end - start) * 1000 for start, end in zip(start_times, end_times)]
+    return latencies
+
+
+def compute_jitter(latencies: List[float]) -> float:
+    """
+    Compute jitter as the standard deviation of latencies.
+
+    Args:
+        latencies (List[float]): Latency measurements in ms.
+
+    Returns:
+        float: Jitter in ms.
+    """
+    return float(np.std(latencies))
+
+
+def generate_plots(latencies: List[float], output_dir: str) -> None:
+    """
+    Generate latency histogram plot.
+
+    Args:
+        latencies (List[float]): Latency measurements.
+        output_dir (str): Directory to save plots.
+    """
+    os.makedirs(output_dir, exist_ok=True)
+    plt.figure(figsize=(8, 5))
+    plt.hist(latencies, bins=30, color='skyblue', edgecolor='black')
+    plt.title("Latency Distribution")
+    plt.xlabel("Latency (ms)")
+    plt.ylabel("Frequency")
+    plt.grid(True)
+    plt.tight_layout()
+    plot_path = os.path.join(output_dir, "latency_histogram.png")
+    plt.savefig(plot_path)
+    plt.close()
+    print(f"[INFO] Plot saved to {plot_path}")
+
+
+def save_results(latencies: List[float], output_dir: str) -> None:
+    """
+    Save latency metrics to a JSON file.
+
+    Args:
+        latencies (List[float]): Latency measurements.
+        output_dir (str): Directory to save results.
+    """
+    results = {
+        "min_latency_ms": float(np.min(latencies)),
+        "max_latency_ms": float(np.max(latencies)),
+        "avg_latency_ms": float(np.mean(latencies)),
+        "jitter_ms": compute_jitter(latencies),
+        "num_samples": len(latencies)
+    }
+    os.makedirs(output_dir, exist_ok=True)
+    result_file = os.path.join(output_dir, "latency_results.json")
+    with open(result_file, 'w') as f:
+        json.dump(results, f, indent=4)
+    print(f"[INFO] Results saved to {result_file}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Halo.OS VBS Performance Analyzer")
+    parser.add_argument("--input", required=True, help="Input JSONL trace file")
+    parser.add_argument("--output", required=True, help="Output directory for results")
+    parser.add_argument("--start_event", default="camera_trigger", help="Start event name")
+    parser.add_argument("--end_event", default="brake_applied", help="End event name")
+    args = parser.parse_args()
+
+    try:
+        events = parse_trace(args.input)
+        latencies = compute_latency(events, args.start_event, args.end_event)
+        generate_plots(latencies, args.output)
+        save_results(latencies, args.output)
+        print(f"[INFO] Analysis completed successfully. {len(latencies)} samples processed.")
+    except Exception as e:
+        print(f"[ERROR] {e}")
+
+
+if __name__ == "__main__":
+    main()
