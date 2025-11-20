@@ -21,15 +21,15 @@ This enables independent verification (or refutation) of published numbers (~100
 ## Repo structure
 
 halo-os-perf-harness/
-├── .github/                      # Optional CI workflows
+├── .github/                      # CI workflows
 ├── ci/                           # Scripts for setup, build, experiment, and analysis
-│   ├── setup_env.sh              # Installs host dependencies
-│   ├── build_halo.sh             # Builds Halo.OS instrumented demo
-│   ├── run_vbs_test.sh           # Simulation run
-│   ├── run_vbs_test_hw.sh        # Real hardware run
-│   ├── detect_hw.sh              # Detects target hardware
-│   ├── env_dump.sh               # Dumps system info
-│   └── analyze_vbs.py            # Analyze tracepoints, latency, jitter, NPU/GPU
+│   ├── setup_env.sh              # Shell: Installs host dependencies
+│   ├── build_halo.sh             # Shell: Builds Halo.OS instrumented demo
+│   ├── run_vbs_test.sh           # Shell: Simulation run
+│   ├── run_vbs_test_hw.sh        # Shell: Real hardware run
+│   ├── detect_hw.sh              # Shell: Detects target hardware
+│   ├── env_dump.sh               # Shell: Dumps system info
+│   └── analyze_vbs.py            # Python: Analyze tracepoints, latency, jitter, NPU/GPU
 ├── tracepoints/
 │   └── halo_tracepoints.h        # LTTng-UST tracepoints
 ├── manifests/
@@ -45,6 +45,7 @@ halo-os-perf-harness/
 ├── LICENSE
 ├── .gitignore
 └── README.md
+
 
 
 ```text
