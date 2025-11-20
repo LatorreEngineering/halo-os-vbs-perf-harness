@@ -17,6 +17,7 @@ This enables independent verification (or refutation) of published numbers (~100
 - Ubuntu 22.04 host (x86 CI runner or Docker)
 
 ---
+```text
 ## Repo structure
 
 halo-os-perf-harness/
@@ -45,24 +46,6 @@ halo-os-perf-harness/
 ├── .gitignore
 └── README.md
 
-## Quick Start
-
-```bash
-# 1. Clone repo
-git clone https://github.com/open-auto-benchmarks/halo-os-perf-harness.git
-cd halo-os-perf-harness
-
-# 2. Install environment dependencies
-./ci/setup_env.sh
-
-# 3. Build the instrumented demo
-./ci/build_halo.sh
-
-# 4. Run a 5-minute 120 km/h AEB workload
-./ci/run_experiment.sh run001 300
-
-# 5. Analyze traces
-python3 ci/analyze.py results/run001/events.jsonl
 
 ```text
 
@@ -127,6 +110,25 @@ References
 	•	ISO 26262-8:2018, Clause 11 – Timing Analysis
 
 ⸻
+## Quick Start
+
+```bash
+# 1. Clone repo
+git clone https://github.com/open-auto-benchmarks/halo-os-perf-harness.git
+cd halo-os-perf-harness
+
+# 2. Install environment dependencies
+./ci/setup_env.sh
+
+# 3. Build the instrumented demo
+./ci/build_halo.sh
+
+# 4. Run a 5-minute 120 km/h AEB workload
+./ci/run_experiment.sh run001 300
+
+# 5. Analyze traces
+python3 ci/analyze.py results/run001/events.jsonl
+
 
 License
 
