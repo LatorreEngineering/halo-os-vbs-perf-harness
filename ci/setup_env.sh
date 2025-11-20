@@ -27,13 +27,13 @@ $SUDO apt-get install -y can-utils iproute2
 python3 -m pip install --upgrade pip
 python3 -m pip install --no-cache-dir pandas numpy matplotlib
 
-# Create results directory if missing
-mkdir -p /workspace/results
+# Create results directory in workspace
+mkdir -p "${WORKSPACE}/results"
 
 # Optional: Docker environment tweaks
 if [ -f /.dockerenv ]; then
     echo "Detected Docker environment"
-    export LTTNG_HOME=/workspace/results/lttng
+    export LTTNG_HOME="${WORKSPACE}/results/lttng"
 fi
 
 echo "=== Environment setup complete ==="
