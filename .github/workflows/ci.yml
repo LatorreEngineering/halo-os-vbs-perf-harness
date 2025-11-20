@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       WORKSPACE: ${{ github.workspace }}
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}   # <-- Add your Gitee token as a GitHub secret
 
     steps:
       # -------------------------------
@@ -29,6 +30,17 @@ jobs:
       # -------------------------------
       - name: Setup environment
         run: ./ci/setup_env.sh
+
+      # -------------------------------
+      # Install repo tool
+      # -------------------------------
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          export PATH=~/bin:$PATH
+          repo --version
 
       # -------------------------------
       # Build Halo.OS demo
@@ -104,4 +116,3 @@ jobs:
           assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
-
