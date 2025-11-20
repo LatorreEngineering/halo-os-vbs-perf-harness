@@ -3,60 +3,63 @@ set -euo pipefail
 
 echo "=== Building instrumented Halo.OS demo ==="
 
-# -------------------------------
-# Setup workspace directories
-# -------------------------------
+# Use WORKSPACE env variable or default to current directory
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 MANIFEST_DIR="$WORKSPACE/manifests"
 REPO_DIR="$WORKSPACE/repo"
-mkdir -p "$MANIFEST_DIR" "$REPO_DIR"
+mkdir -p "$MANIFEST_DIR"
 
 # -------------------------------
-# Manifest file selection
+# Select manifest file to use
 # -------------------------------
 MANIFEST_FILE="$MANIFEST_DIR/manifest_20250825.xml"
+MANIFEST_URL="https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+DEFAULT_MANIFEST_FILE="$MANIFEST_DIR/default.xml"
+DEFAULT_MANIFEST_URL="https://gitee.com/haloos/manifests/raw/main/default.xml"
 
 # -------------------------------
-# Download manifest if missing
+# Download manifest
 # -------------------------------
-if [ ! -f "$MANIFEST_FILE" ]; then
-    echo "Downloading manifest_20250825.xml from Halo.OS Gitee..."
-    MANIFEST_RAW_URL="https://gitee.com/haloos/manifests/raw/master/manifest_20250825.xml"
-
+download_manifest() {
+    local file="$1"
+    local url="$2"
     if [ -n "${GITEE_TOKEN:-}" ]; then
-        curl -fsSL -H "Authorization: token $GITEE_TOKEN" -o "$MANIFEST_FILE" "$MANIFEST_RAW_URL"
+        curl -fsSL -H "Authorization: token $GITEE_TOKEN" -o "$file" "$url"
     else
-        curl -fsSL -o "$MANIFEST_FILE" "$MANIFEST_RAW_URL"
+        curl -fsSL -o "$file" "$url"
     fi
+}
 
-    if [ ! -f "$MANIFEST_FILE" ]; then
-        echo "❌ Failed to download manifest from $MANIFEST_RAW_URL"
+echo "Downloading manifest_20250825.xml from Halo.OS Gitee..."
+if ! download_manifest "$MANIFEST_FILE" "$MANIFEST_URL"; then
+    echo "⚠️ manifest_20250825.xml not found, falling back to default.xml"
+    if ! download_manifest "$DEFAULT_MANIFEST_FILE" "$DEFAULT_MANIFEST_URL"; then
+        echo "❌ Failed to download default.xml as fallback"
         exit 1
     fi
+    MANIFEST_FILE="$DEFAULT_MANIFEST_FILE"
 fi
 
 # -------------------------------
-# Ensure 'repo' tool is installed
+# Initialize repo
 # -------------------------------
+mkdir -p "$REPO_DIR"
+cd "$REPO_DIR"
+
+# Ensure 'repo' is installed
 if ! command -v repo &> /dev/null; then
-    echo "❌ 'repo' tool not found. Make sure setup_env.sh installed it."
+    echo "❌ 'repo' tool not found. Make sure setup_env.sh ran correctly."
     exit 1
 fi
 
-# -------------------------------
-# Prepare repo URL
-# -------------------------------
+# Prepare authenticated URL if token is available
 REPO_URL="https://gitee.com/haloos/manifest.git"
 if [ -n "${GITEE_TOKEN:-}" ]; then
-    # Embed token for authenticated access
     REPO_URL="https://$GITEE_TOKEN@e.gitee.com/haloos/manifest.git"
 fi
 
-# -------------------------------
 # Initialize and sync repo
-# -------------------------------
-cd "$REPO_DIR"
-echo "Initializing repo..."
+echo "Initializing repo with $MANIFEST_FILE..."
 repo init -u "$REPO_URL" -m "$MANIFEST_FILE" --quiet
 echo "Syncing repo..."
 repo sync --force-sync --quiet
@@ -81,13 +84,9 @@ else
     exit 1
 fi
 
-# -------------------------------
-# Build with CMake
-# -------------------------------
+# Build using CMake
 cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
 echo "Executable located at $BUILD_DIR/rt_demo"
-
-
