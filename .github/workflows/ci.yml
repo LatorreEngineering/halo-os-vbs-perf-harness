@@ -1,0 +1,23 @@
+name: Halo.OS Perf CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: Setup environment
+      run: ./ci/setup_env.sh
+    - name: Build Halo.OS demo
+      run: ./ci/build_halo.sh
+    - name: Run sample experiment
+      run: ./ci/run_experiment.sh ci_test 30
+    - name: Analyze
+      run: python3 ci/analyze.py results/ci_test/events.jsonl
+    - name: Generate plot
+      run: python3 ci/visualize.py results/ci_test/events.jsonl
