@@ -3,51 +3,59 @@ set -euo pipefail
 
 echo "=== Building instrumented Halo.OS demo ==="
 
-# Use WORKSPACE env variable or default to current directory
+# -------------------------------
+# Setup workspace directories
+# -------------------------------
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 MANIFEST_DIR="$WORKSPACE/manifests"
 REPO_DIR="$WORKSPACE/repo"
+mkdir -p "$MANIFEST_DIR" "$REPO_DIR"
 
 # -------------------------------
-# Select manifest file to use
+# Manifest file selection
 # -------------------------------
 MANIFEST_FILE="$MANIFEST_DIR/manifest_20250825.xml"
-mkdir -p "$MANIFEST_DIR"
 
 # -------------------------------
 # Download manifest if missing
 # -------------------------------
 if [ ! -f "$MANIFEST_FILE" ]; then
     echo "Downloading manifest_20250825.xml from Halo.OS Gitee..."
+    MANIFEST_RAW_URL="https://gitee.com/haloos/manifests/raw/master/manifest_20250825.xml"
+
     if [ -n "${GITEE_TOKEN:-}" ]; then
-        curl -fsSL -H "Authorization: token $GITEE_TOKEN" \
-             -o "$MANIFEST_FILE" \
-             "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+        curl -fsSL -H "Authorization: token $GITEE_TOKEN" -o "$MANIFEST_FILE" "$MANIFEST_RAW_URL"
     else
-        curl -fsSL -o "$MANIFEST_FILE" \
-             "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+        curl -fsSL -o "$MANIFEST_FILE" "$MANIFEST_RAW_URL"
+    fi
+
+    if [ ! -f "$MANIFEST_FILE" ]; then
+        echo "❌ Failed to download manifest from $MANIFEST_RAW_URL"
+        exit 1
     fi
 fi
 
 # -------------------------------
-# Initialize repo
+# Ensure 'repo' tool is installed
 # -------------------------------
-mkdir -p "$REPO_DIR"
-cd "$REPO_DIR"
-
-# Ensure 'repo' is installed
 if ! command -v repo &> /dev/null; then
-    echo "❌ 'repo' tool not found. Make sure setup_env.sh ran correctly."
+    echo "❌ 'repo' tool not found. Make sure setup_env.sh installed it."
     exit 1
 fi
 
-# Prepare authenticated URL if token is available
+# -------------------------------
+# Prepare repo URL
+# -------------------------------
 REPO_URL="https://gitee.com/haloos/manifest.git"
 if [ -n "${GITEE_TOKEN:-}" ]; then
+    # Embed token for authenticated access
     REPO_URL="https://$GITEE_TOKEN@e.gitee.com/haloos/manifest.git"
 fi
 
+# -------------------------------
 # Initialize and sync repo
+# -------------------------------
+cd "$REPO_DIR"
 echo "Initializing repo..."
 repo init -u "$REPO_URL" -m "$MANIFEST_FILE" --quiet
 echo "Syncing repo..."
@@ -73,10 +81,13 @@ else
     exit 1
 fi
 
-# Build using CMake
+# -------------------------------
+# Build with CMake
+# -------------------------------
 cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
 echo "Executable located at $BUILD_DIR/rt_demo"
+
 
