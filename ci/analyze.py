@@ -1,138 +1,90 @@
-#!/usr/bin/env python3
-"""
-analyze_vbs.py - Modular performance analysis for Halo.OS VBS traces.
+#!/usr/bin/env bash
+# run_vbs_analysis.sh - Run Halo.OS VBS performance analysis
+# Usage:
+#   ./run_vbs_analysis.sh --trace <trace_dir> --output <output_dir> [--start_event <start>] [--end_event <end>]
 
-This script parses LTTng trace data, computes latency and jitter metrics,
-and generates reports/plots for analysis.
+set -euo pipefail
+IFS=$'\n\t'
 
-Usage:
-    python analyze_vbs.py --input sample_events.jsonl --output results/
-"""
+# -------------------------------
+# Helper functions
+# -------------------------------
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1"
+}
 
-import argparse
-import json
-import os
-from typing import List, Dict, Tuple
-import matplotlib.pyplot as plt
-import numpy as np
+usage() {
+    echo "Usage: $0 --trace <trace_dir> --output <output_dir> [--start_event <start>] [--end_event <end>]"
+    exit 1
+}
 
+# -------------------------------
+# Parse arguments
+# -------------------------------
+TRACE_DIR=""
+OUTPUT_DIR=""
+START_EVENT="halo_camera_ingest"
+END_EVENT="halo_brake_actuate"
 
-def parse_trace(file_path: str) -> List[Dict]:
-    """
-    Parse a JSONL trace file into a list of events.
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --trace)
+            TRACE_DIR="$2"
+            shift 2
+            ;;
+        --output)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        --start_event)
+            START_EVENT="$2"
+            shift 2
+            ;;
+        --end_event)
+            END_EVENT="$2"
+            shift 2
+            ;;
+        *)
+            usage
+            ;;
+    esac
+done
 
-    Args:
-        file_path (str): Path to JSONL trace file.
+# -------------------------------
+# Validate inputs
+# -------------------------------
+if [[ -z "$TRACE_DIR" || -z "$OUTPUT_DIR" ]]; then
+    usage
+fi
 
-    Returns:
-        List[Dict]: List of event dictionaries.
-    """
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"Trace file not found: {file_path}")
-    
-    events = []
-    with open(file_path, 'r') as f:
-        for line in f:
-            events.append(json.loads(line.strip()))
-    return events
+if [[ ! -d "$TRACE_DIR" ]]; then
+    log "ERROR: Trace directory does not exist: $TRACE_DIR"
+    exit 1
+fi
 
+PYTHON_SCRIPT="./analyze_vbs.py"
+if [[ ! -f "$PYTHON_SCRIPT" ]]; then
+    log "ERROR: Python analysis script not found: $PYTHON_SCRIPT"
+    exit 1
+fi
 
-def compute_latency(events: List[Dict], start_event: str, end_event: str) -> List[float]:
-    """
-    Compute latency between two types of events.
+# -------------------------------
+# Prepare output directory
+# -------------------------------
+TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+RUN_OUTPUT="$OUTPUT_DIR/run_$TIMESTAMP"
+mkdir -p "$RUN_OUTPUT"
+log "Output directory for this run: $RUN_OUTPUT"
 
-    Args:
-        events (List[Dict]): Parsed event list.
-        start_event (str): Name of the start event.
-        end_event (str): Name of the end event.
+# -------------------------------
+# Run performance analysis
+# -------------------------------
+log "Starting VBS performance analysis..."
+python3 "$PYTHON_SCRIPT" \
+    --trace "$TRACE_DIR" \
+    --output "$RUN_OUTPUT" \
+    --start_event "$START_EVENT" \
+    --end_event "$END_EVENT"
 
-    Returns:
-        List[float]: Latencies in milliseconds.
-    """
-    start_times = [e['timestamp'] for e in events if e['name'] == start_event]
-    end_times = [e['timestamp'] for e in events if e['name'] == end_event]
-
-    if len(start_times) != len(end_times):
-        raise ValueError("Mismatch in number of start/end events")
-    
-    latencies = [(end - start) * 1000 for start, end in zip(start_times, end_times)]
-    return latencies
-
-
-def compute_jitter(latencies: List[float]) -> float:
-    """
-    Compute jitter as the standard deviation of latencies.
-
-    Args:
-        latencies (List[float]): Latency measurements in ms.
-
-    Returns:
-        float: Jitter in ms.
-    """
-    return float(np.std(latencies))
-
-
-def generate_plots(latencies: List[float], output_dir: str) -> None:
-    """
-    Generate latency histogram plot.
-
-    Args:
-        latencies (List[float]): Latency measurements.
-        output_dir (str): Directory to save plots.
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    plt.figure(figsize=(8, 5))
-    plt.hist(latencies, bins=30, color='skyblue', edgecolor='black')
-    plt.title("Latency Distribution")
-    plt.xlabel("Latency (ms)")
-    plt.ylabel("Frequency")
-    plt.grid(True)
-    plt.tight_layout()
-    plot_path = os.path.join(output_dir, "latency_histogram.png")
-    plt.savefig(plot_path)
-    plt.close()
-    print(f"[INFO] Plot saved to {plot_path}")
-
-
-def save_results(latencies: List[float], output_dir: str) -> None:
-    """
-    Save latency metrics to a JSON file.
-
-    Args:
-        latencies (List[float]): Latency measurements.
-        output_dir (str): Directory to save results.
-    """
-    results = {
-        "min_latency_ms": float(np.min(latencies)),
-        "max_latency_ms": float(np.max(latencies)),
-        "avg_latency_ms": float(np.mean(latencies)),
-        "jitter_ms": compute_jitter(latencies),
-        "num_samples": len(latencies)
-    }
-    os.makedirs(output_dir, exist_ok=True)
-    result_file = os.path.join(output_dir, "latency_results.json")
-    with open(result_file, 'w') as f:
-        json.dump(results, f, indent=4)
-    print(f"[INFO] Results saved to {result_file}")
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Halo.OS VBS Performance Analyzer")
-    parser.add_argument("--input", required=True, help="Input JSONL trace file")
-    parser.add_argument("--output", required=True, help="Output directory for results")
-    parser.add_argument("--start_event", default="camera_trigger", help="Start event name")
-    parser.add_argument("--end_event", default="brake_applied", help="End event name")
-    args = parser.parse_args()
-
-    try:
-        events = parse_trace(args.input)
-        latencies = compute_latency(events, args.start_event, args.end_event)
-        generate_plots(latencies, args.output)
-        save_results(latencies, args.output)
-        print(f"[INFO] Analysis completed successfully. {len(latencies)} samples processed.")
-    except Exception as e:
-        print(f"[ERROR] {e}")
-
-
-if __name__ == "__main__":
-    main()
+log "VBS performance analysis completed successfully."
+log "Results saved in $RUN_OUTPUT"
