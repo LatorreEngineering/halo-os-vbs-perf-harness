@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       WORKSPACE: ${{ github.workspace }}
+
     steps:
       # -------------------------------
       # Checkout repository
@@ -30,13 +31,13 @@ jobs:
         run: ./ci/setup_env.sh
 
       # -------------------------------
-      # Build Halo.OS demo (with manifest download)
+      # Build Halo.OS demo
       # -------------------------------
       - name: Build Halo.OS demo
         run: ./ci/build_halo.sh
 
       # -------------------------------
-      # Run experiment
+      # Run sample experiment
       # -------------------------------
       - name: Run sample experiment
         run: ./ci/run_experiment.sh ci_test 30
@@ -67,7 +68,7 @@ jobs:
           files: 'ci/*.sh'
 
       # -------------------------------
-      # Run VBS analysis using analyze_vbs.py
+      # Run VBS analysis
       # -------------------------------
       - name: Run VBS analysis
         run: |
@@ -76,7 +77,8 @@ jobs:
             --trace results/ci_test \
             --output results_test \
             --start_event halo_camera_ingest \
-            --end_event halo_brake_actuate
+            --end_event halo_brake_actuate \
+            --bins 30
 
       # -------------------------------
       # Validate analysis results
@@ -102,3 +104,4 @@ jobs:
           assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
+
