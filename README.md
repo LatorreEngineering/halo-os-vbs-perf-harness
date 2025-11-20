@@ -2,7 +2,6 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-# Halo.OS Performance Harness (Nov 2025 Baseline)
 
 **Goal**  
 Provide a fully open-source, reproducible framework to measure end-to-end latency, jitter, and NPU virtualization overhead of Halo.OS (or any centralized vehicle OS). 
@@ -18,6 +17,33 @@ This enables independent verification (or refutation) of published numbers (~100
 - Ubuntu 22.04 host (x86 CI runner or Docker)
 
 ---
+## Repo structure
+
+halo-os-perf-harness/
+├── .github/                      # Optional CI workflows
+├── ci/                           # Scripts for setup, build, experiment, and analysis
+│   ├── setup_env.sh              # Installs host dependencies
+│   ├── build_halo.sh             # Builds Halo.OS instrumented demo
+│   ├── run_vbs_test.sh           # Simulation run
+│   ├── run_vbs_test_hw.sh        # Real hardware run
+│   ├── detect_hw.sh              # Detects target hardware
+│   ├── env_dump.sh               # Dumps system info
+│   └── analyze_vbs.py            # Analyze tracepoints, latency, jitter, NPU/GPU
+├── tracepoints/
+│   └── halo_tracepoints.h        # LTTng-UST tracepoints
+├── manifests/
+│   └── pinned_manifest.xml       # Nov 2025 Halo.OS baseline
+├── examples/
+│   ├── sample_events.jsonl
+│   └── expected_output.txt
+├── docs/
+│   └── workflow.svg
+├── Dockerfile                     # For x86 CI runners
+├── docker-compose.yml
+├── requirements.txt
+├── LICENSE
+├── .gitignore
+└── README.md
 
 ## Quick Start
 
@@ -67,30 +93,6 @@ All published numbers (≈100 ms AEB latency, <3 ms jitter, 18–22% NPU overhea
 ## Repository Structure
 
 ```text
-halo-os-perf-harness/
-├── .github/                  # Optional GitHub Actions workflows
-│   └── workflows/
-│       └── ci.yml            # CI pipeline (Docker + x86 or Jetson)
-├── ci/                       # Build, experiment, analysis scripts
-│   ├── setup_env.sh           # Universal environment setup
-│   ├── build_halo.sh          # Builds instrumented Halo.OS demo
-│   ├── run_experiment.sh      # Runs AEB workloads with tracing
-│   └── analyze.py             # Parses LTTng JSON logs for latency/jitter/NPU overhead
-├── tracepoints/              # LTTng-UST tracepoint definitions
-│   └── halo_tracepoints.h
-├── manifests/                # Pinned manifest for reproducible build
-│   └── pinned_manifest.xml
-├── examples/                 # Sample events and expected output
-│   ├── sample_events.jsonl
-│   └── expected_output.txt
-├── docs/                     # Diagrams and workflow visuals
-│   └── workflow.svg
-├── Dockerfile                # x86 CI runner environment
-├── docker-compose.yml
-├── requirements.txt
-├── LICENSE
-├── .gitignore
-└── README.md
 
 
 Expected Output (Nov 18, 2025 run)
