@@ -3,26 +3,35 @@ set -euo pipefail
 
 echo "=== Building instrumented Halo.OS demo ==="
 
-# Use WORKSPACE env variable or default to current directory
+# Ensure WORKSPACE is defined
 WORKSPACE="${WORKSPACE:-$(pwd)}"
+
+# Manifest setup
 MANIFEST_DIR="$WORKSPACE/manifests"
 MANIFEST_FILE="$MANIFEST_DIR/manifest_20250825.xml"
-
-# Create manifests directory if missing
 mkdir -p "$MANIFEST_DIR"
 
-# Download the manifest if it doesn't exist
+# Download the manifest if missing
 if [ ! -f "$MANIFEST_FILE" ]; then
     echo "Downloading manifest_20250825.xml from Gitee..."
     curl -L -o "$MANIFEST_FILE" "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
 fi
+
+# Ensure GITEE_TOKEN is set
+: "${GITEE_TOKEN:?GITEE_TOKEN secret must be set in GitHub Actions}"
 
 # Initialize repo inside WORKSPACE
 REPO_DIR="$WORKSPACE/repo"
 mkdir -p "$REPO_DIR"
 cd "$REPO_DIR"
 
-repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE" --quiet
+# Use token in HTTPS URL for authentication
+REPO_URL="https://${GITEE_TOKEN}@gitee.com/haloos/manifest.git"
+
+echo "Initializing repo..."
+repo init -u "$REPO_URL" -m "$MANIFEST_FILE" --quiet
+
+echo "Syncing repo..."
 repo sync --force-sync --quiet
 
 # Build instrumented demo
@@ -39,7 +48,7 @@ elif [ -f "$WORKSPACE/toolchains/host.cmake" ]; then
     TOOLCHAIN_FILE="$WORKSPACE/toolchains/host.cmake"
     echo "Using host/x86 toolchain"
 else
-    echo "No toolchain file found. Please add one to $WORKSPACE/toolchains/"
+    echo "No toolchain file found in $WORKSPACE/toolchains/"
     exit 1
 fi
 
