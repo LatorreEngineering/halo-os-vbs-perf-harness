@@ -9,6 +9,9 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-22.04
+    env:
+      WORKSPACE: ${{ github.workspace }}/workspace
+
     steps:
       # -------------------------------
       # Checkout repository
@@ -31,7 +34,7 @@ jobs:
       # Run experiment
       # -------------------------------
       - name: Run sample experiment
-        run: ./ci/run_experiment.sh ci_test 30
+        run: ./ci/run_experiment.sh "$WORKSPACE/results/ci_test" 30
 
       # -------------------------------
       # Python environment & linting
@@ -63,13 +66,12 @@ jobs:
       # -------------------------------
       - name: Run VBS analysis
         run: |
-          mkdir -p results_test
+          mkdir -p "$WORKSPACE/results_test"
           python3 ci/analyze_vbs.py \
-            --trace results/ci_test \
-            --output results_test \
+            --trace "$WORKSPACE/results/ci_test" \
+            --output "$WORKSPACE/results_test" \
             --start_event halo_camera_ingest \
-            --end_event halo_brake_actuate \
-            --bins 30
+            --end_event halo_brake_actuate
 
       # -------------------------------
       # Validate analysis results
@@ -79,8 +81,9 @@ jobs:
           python3 - <<'EOF'
           import json
           from pathlib import Path
+          workspace = Path("${WORKSPACE}") / "results_test"
 
-          run_dirs = sorted(Path("results_test").glob("run_*"))
+          run_dirs = sorted(workspace.glob("run_*"))
           if not run_dirs:
               raise FileNotFoundError("No analysis run directories found!")
 
