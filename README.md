@@ -31,11 +31,22 @@ All published numbers (≈100 ms AEB latency, <3 ms jitter, 18–22% NPU overhea
 ```text
 halo-os-perf-harness/
 ├── .github/                  # Optional GitHub Actions workflows
-├── ci/                       # Scripts for setup, build, experiment, and analysis
+│   └── workflows/
+│       └── ci.yml            # CI pipeline (Docker + x86 or Jetson)
+├── ci/                       # Build, experiment, analysis scripts
+│   ├── setup_env.sh           # Universal environment setup
+│   ├── build_halo.sh          # Builds instrumented Halo.OS demo
+│   ├── run_experiment.sh      # Runs AEB workloads with tracing
+│   └── analyze.py             # Parses LTTng JSON logs for latency/jitter/NPU overhead
 ├── tracepoints/              # LTTng-UST tracepoint definitions
-├── manifests/                # Pinned Halo.OS manifest (Nov 2025 baseline)
-├── examples/                 # Sample events and expected outputs
-├── docs/                     # Diagrams, workflow visuals
+│   └── halo_tracepoints.h
+├── manifests/                # Pinned manifest for reproducible build
+│   └── pinned_manifest.xml
+├── examples/                 # Sample events and expected output
+│   ├── sample_events.jsonl
+│   └── expected_output.txt
+├── docs/                     # Diagrams and workflow visuals
+│   └── workflow.svg
 ├── Dockerfile                # x86 CI runner environment
 ├── docker-compose.yml
 ├── requirements.txt
