@@ -32,14 +32,15 @@ jobs:
         run: ./ci/setup_env.sh
 
       # -------------------------------
-      # Install repo tool
+      # Install 'repo' tool
       # -------------------------------
       - name: Install repo tool
         run: |
           mkdir -p ~/bin
           curl -sSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
           chmod a+x ~/bin/repo
-          export PATH=~/bin:$PATH
+          echo "Adding ~/bin to PATH"
+          echo "$HOME/bin" >> $GITHUB_PATH
           repo --version
 
       # -------------------------------
@@ -116,4 +117,3 @@ jobs:
           assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
-
