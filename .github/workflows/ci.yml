@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       WORKSPACE: ${{ github.workspace }}
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}   # <-- Add your Gitee token as a GitHub secret
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
 
     steps:
       # -------------------------------
@@ -37,7 +37,7 @@ jobs:
       - name: Install repo tool
         run: |
           mkdir -p ~/bin
-          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
           chmod a+x ~/bin/repo
           export PATH=~/bin:$PATH
           repo --version
@@ -80,7 +80,7 @@ jobs:
           files: 'ci/*.sh'
 
       # -------------------------------
-      # Run VBS analysis
+      # Run VBS analysis using analyze_vbs.py
       # -------------------------------
       - name: Run VBS analysis
         run: |
@@ -116,3 +116,4 @@ jobs:
           assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
+
