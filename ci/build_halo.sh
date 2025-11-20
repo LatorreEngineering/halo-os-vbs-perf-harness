@@ -14,10 +14,19 @@ REPO_DIR="$WORKSPACE/repo"
 MANIFEST_FILE="$MANIFEST_DIR/manifest_20250825.xml"
 mkdir -p "$MANIFEST_DIR"
 
+# -------------------------------
 # Download manifest if missing
+# -------------------------------
 if [ ! -f "$MANIFEST_FILE" ]; then
     echo "Downloading manifest_20250825.xml from Halo.OS Gitee..."
-    curl -fsSL -o "$MANIFEST_FILE" "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+    if [ -n "${GITEE_TOKEN:-}" ]; then
+        curl -fsSL -H "Authorization: token $GITEE_TOKEN" \
+             -o "$MANIFEST_FILE" \
+             "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+    else
+        curl -fsSL -o "$MANIFEST_FILE" \
+             "https://gitee.com/haloos/manifests/raw/main/manifest_20250825.xml"
+    fi
 fi
 
 # -------------------------------
@@ -26,14 +35,22 @@ fi
 mkdir -p "$REPO_DIR"
 cd "$REPO_DIR"
 
-# Make sure 'repo' command is available
+# Ensure 'repo' is installed
 if ! command -v repo &> /dev/null; then
     echo "❌ 'repo' tool not found. Make sure setup_env.sh ran correctly."
     exit 1
 fi
 
-# Init and sync repo
-repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE" --quiet
+# Prepare authenticated URL if token is available
+REPO_URL="https://gitee.com/haloos/manifest.git"
+if [ -n "${GITEE_TOKEN:-}" ]; then
+    REPO_URL="https://$GITEE_TOKEN@e.gitee.com/haloos/manifest.git"
+fi
+
+# Initialize and sync repo
+echo "Initializing repo..."
+repo init -u "$REPO_URL" -m "$MANIFEST_FILE" --quiet
+echo "Syncing repo..."
 repo sync --force-sync --quiet
 
 # -------------------------------
@@ -56,8 +73,10 @@ else
     exit 1
 fi
 
+# Build using CMake
 cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
 echo "Executable located at $BUILD_DIR/rt_demo"
+
