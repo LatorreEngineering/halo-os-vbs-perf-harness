@@ -1,41 +1,55 @@
-# Prerequisites
-*.d
+# ==========================
+# Halo.OS Perf Harness Gitignore
+# ==========================
 
-# Compiled Object files
-*.slo
-*.lo
+# Build artifacts
+build/
 *.o
-*.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Linker files
-*.ilk
-
-# Debugger Files
-*.pdb
-
-# Compiled Dynamic libraries
 *.so
-*.dylib
-*.dll
-
-# Fortran module files
-*.mod
-*.smod
-
-# Compiled Static libraries
-*.lai
-*.la
 *.a
-*.lib
-
-# Executables
-*.exe
 *.out
-*.app
+CMakeFiles/
+CMakeCache.txt
+Makefile
+cmake_install.cmake
 
-# debug information files
-*.dwo
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# LTTng traces
+ust/
+*.log
+*.ctf
+
+# Tcpdump / network captures
+*.pcap
+
+# Repo manifest temp folders
+.repo/
+
+# Results from experiments
+results/
+*.tmp
+
+# Docker / container files
+*.pid
+*.env
+*.dockerignore
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Editor configs
+*.swp
+*.swo
+.vscode/
+.idea/
+*.iml
+
+# Misc
+*.bak
+*.swp
