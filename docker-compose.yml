@@ -1,0 +1,20 @@
+version: "3.8"
+
+services:
+  halo-perf:
+    build: .
+    container_name: halo_perf_runner
+    tty: true
+    stdin_open: true
+    volumes:
+      - ./:/workspace
+    networks:
+      - halo-net
+    cap_add:
+      - NET_ADMIN      # Required for tcpdump
+      - SYS_ADMIN
+    privileged: true   # Needed for packet capture and LTTng kernel modules
+
+networks:
+  halo-net:
+    driver: bridge
