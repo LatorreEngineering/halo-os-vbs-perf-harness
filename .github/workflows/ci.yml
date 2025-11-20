@@ -44,9 +44,11 @@ jobs:
           repo --version
 
       # -------------------------------
-      # Build Halo.OS demo
+      # Build Halo.OS demo with fallback manifest support
       # -------------------------------
       - name: Build Halo.OS demo
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: ./ci/build_halo.sh
 
       # -------------------------------
