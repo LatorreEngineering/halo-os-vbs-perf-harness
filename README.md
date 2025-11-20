@@ -38,6 +38,8 @@ cd halo-os-perf-harness
 # 5. Analyze traces
 python3 ci/analyze.py results/run001/events.jsonl
 
+```text
+
 ## Overview
 
 This repository provides a **100% open-source, reproducible framework** to measure and validate **Halo.OS performance metrics**, including:
@@ -90,29 +92,6 @@ halo-os-perf-harness/
 ├── .gitignore
 └── README.md
 
-Quick Start (5 Minutes)
-
-1. Clone Repository
-git clone https://github.com/open-auto-benchmarks/halo-os-perf-harness.git
-cd halo-os-perf-harness
-
-2. Install Host Dependencies
-./ci/setup_env.sh
-
-3. Sync Halo.OS Nov 2025 Baseline
-repo init -u https://gitee.com/haloos/manifest.git -m manifests/pinned_manifest.xml
-repo sync --force-sync
-
-4. Build the Instrumented Demo
-./ci/build_halo.sh
-
-Build takes ~8 minutes on Jetson AGX Orin.
-
-5. Run a 120 km/h AEB Scenario
-./ci/run_experiment.sh run001 300
-
-6. Analyze Results
-python3 ci/analyze.py results/run001/events.jsonl
 
 Expected Output (Nov 18, 2025 run)
 
