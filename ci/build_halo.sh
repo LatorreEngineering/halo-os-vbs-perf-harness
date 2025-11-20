@@ -8,42 +8,36 @@ echo "=== Building instrumented Halo.OS demo ==="
 # ----------------------------------------
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 MANIFEST_DIR="$WORKSPACE/manifests"
-MANIFEST_FILE="$MANIFEST_DIR/pinned_manifest.xml"
+MANIFEST_FILE="$MANIFEST_DIR/default.xml"
 REPO_DIR="$WORKSPACE/repo"
 
 mkdir -p "$MANIFEST_DIR"
 mkdir -p "$REPO_DIR"
 
 # ----------------------------------------
-# Download manifest (with fallback)
+# Download official Halo.OS manifest
 # ----------------------------------------
 if [ ! -f "$MANIFEST_FILE" ]; then
-    echo "Downloading pinned_manifest.xml..."
+    echo "Downloading Halo.OS default manifest..."
 
-    PRIMARY_URL="https://gitee.com/haloos/manifest/raw/main/pinned_manifest.xml"
-    MIRROR_URL="https://gitee.com/mirrors/haloos-manifest/raw/main/pinned_manifest.xml"
+    MANIFEST_URL="https://gitee.com/haloos/manifest/raw/main/default.xml"
 
-    if curl -fSL "$PRIMARY_URL" -o "$MANIFEST_FILE"; then
-        echo "Downloaded manifest from primary source."
-    else
-        echo "Primary source failed, trying mirror..."
-        if curl -fSL "$MIRROR_URL" -o "$MANIFEST_FILE"; then
-            echo "Downloaded manifest from mirror."
-        else
-            echo "❌ ERROR: Failed to download manifest from both sources."
-            exit 1
-        fi
+    if ! curl -fSL "$MANIFEST_URL" -o "$MANIFEST_FILE"; then
+        echo "❌ ERROR: Could not download default.xml from Halo.OS manifest repo."
+        exit 1
     fi
+
+    echo "Downloaded manifest → $MANIFEST_FILE"
 fi
 
 # ----------------------------------------
-# Initialize repo
+# Repo initialization
 # ----------------------------------------
 cd "$REPO_DIR"
 
-# Remove stale .repo if present (common in CI)
+# Clear stale repo metadata
 if [ -d ".repo" ]; then
-    echo "Cleaning up stale repo directory..."
+    echo "Cleaning up old .repo directory..."
     rm -rf .repo
 fi
 
@@ -52,13 +46,13 @@ echo "Initializing repo..."
 repo init \
     -u https://gitee.com/haloos/manifest.git \
     --repo-dir="$REPO_DIR" \
-    --manifest-name="$(basename "$MANIFEST_FILE")" \
+    --manifest-name="default.xml" \
     --quiet
 
-# Copy our external pinned manifest into .repo/manifests
+# Copy downloaded manifest into repo manifest store
 cp "$MANIFEST_FILE" "$REPO_DIR/.repo/manifests/"
 
-echo "Running repo sync (this may take a while)..."
+echo "Running repo sync..."
 
 repo sync \
     --force-sync \
@@ -71,14 +65,14 @@ repo sync \
 echo "Repo sync complete."
 
 # ----------------------------------------
-# Locate and build Halo rt_demo
+# Build Halo OS rt_demo
 # ----------------------------------------
 DEMO_DIR="$REPO_DIR/apps/rt_demo"
 BUILD_DIR="$DEMO_DIR/build"
 
 if [ ! -d "$DEMO_DIR" ]; then
     echo "❌ ERROR: rt_demo directory not found at: $DEMO_DIR"
-    echo "Repo sync may have failed or manifest may be incorrect."
+    echo "Check the manifest and repo sync results."
     exit 1
 fi
 
@@ -89,31 +83,26 @@ cd "$BUILD_DIR"
 # Toolchain detection
 # ----------------------------------------
 TOOLCHAIN_DIR="$WORKSPACE/toolchains"
-JETSON_TC="$TOOLCHAIN_DIR/jetson.cmake"
-HOST_TC="$TOOLCHAIN_DIR/host.cmake"
 
-if [ -f "$JETSON_TC" ]; then
-    TOOLCHAIN="$JETSON_TC"
-    echo "Using Jetson toolchain."
-elif [ -f "$HOST_TC" ]; then
-    TOOLCHAIN="$HOST_TC"
-    echo "Using host/x86 toolchain."
+if [ -f "$TOOLCHAIN_DIR/jetson.cmake" ]; then
+    TOOLCHAIN="$TOOLCHAIN_DIR/jetson.cmake"
+    echo "Using Jetson toolchain"
+elif [ -f "$TOOLCHAIN_DIR/host.cmake" ]; then
+    TOOLCHAIN="$TOOLCHAIN_DIR/host.cmake"
+    echo "Using host toolchain"
 else
     echo "❌ ERROR: No toolchain found in $TOOLCHAIN_DIR"
     exit 1
 fi
 
 # ----------------------------------------
-# Build (debug logs enabled)
+# Build
 # ----------------------------------------
-echo "Running CMake..."
-cmake .. \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN"
+echo "Configuring CMake..."
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN"
 
 echo "Building..."
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
-echo "Executable located at:"
-echo "   $BUILD_DIR/rt_demo"
+echo "Executable: $BUILD_DIR/rt_demo"
