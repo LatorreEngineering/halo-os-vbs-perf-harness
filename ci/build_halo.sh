@@ -10,14 +10,17 @@ if [ ! -f "$MANIFEST_FILE" ]; then
     exit 1
 fi
 
-# Initialize repo with pinned manifest
-repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE"
-repo sync --force-sync
+# Initialize repo with pinned manifest inside WORKSPACE
+REPO_DIR="${WORKSPACE}/repo"
+mkdir -p "$REPO_DIR"
+cd "$REPO_DIR"
+
+repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE" --repo-dir="$REPO_DIR" --quiet
+repo sync --force-sync --quiet
 
 # Build instrumented demo
-DEMO_DIR="apps/rt_demo"
+DEMO_DIR="$REPO_DIR/apps/rt_demo"
 BUILD_DIR="$DEMO_DIR/build"
-
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
