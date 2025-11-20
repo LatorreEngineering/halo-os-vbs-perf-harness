@@ -30,7 +30,7 @@ $SUDO apt-get install -y --no-install-recommends \
 $SUDO apt-get install -y liblttng-ust-dev lttng-tools babeltrace
 
 # -------------------------------
-# CAN utilities (optional)
+# CAN utilities (optional for VBS emulation)
 # -------------------------------
 $SUDO apt-get install -y can-utils iproute2
 
@@ -38,17 +38,19 @@ $SUDO apt-get install -y can-utils iproute2
 # Python packages
 # -------------------------------
 python3 -m pip install --upgrade pip
-python3 -m pip install --no-cache-dir pandas numpy matplotlib
+python3 -m pip install --no-cache-dir pandas numpy matplotlib flake8 black
 
 # -------------------------------
 # Install 'repo' tool for manifest management
 # -------------------------------
-REPO_BIN="/usr/local/bin/repo"
+REPO_BIN="$HOME/bin/repo"
+mkdir -p "$HOME/bin"
 if ! command -v repo &> /dev/null; then
     echo "Installing repo tool..."
-    $SUDO curl -o "$REPO_BIN" https://storage.googleapis.com/git-repo-downloads/repo
-    $SUDO chmod a+x "$REPO_BIN"
+    curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO_BIN"
+    chmod a+x "$REPO_BIN"
 fi
+export PATH="$HOME/bin:$PATH"
 
 # -------------------------------
 # Create results directory in workspace
@@ -56,7 +58,7 @@ fi
 mkdir -p "$WORKSPACE/results"
 
 # -------------------------------
-# Optional: Docker environment tweaks
+# Docker environment tweaks
 # -------------------------------
 if [ -f /.dockerenv ]; then
     echo "Detected Docker environment"
@@ -64,4 +66,5 @@ if [ -f /.dockerenv ]; then
 fi
 
 echo "=== Environment setup complete ==="
+
 
