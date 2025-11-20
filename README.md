@@ -2,6 +2,42 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
+# Halo.OS Performance Harness (Nov 2025 Baseline)
+
+**Goal**  
+Provide a fully open-source, reproducible framework to measure end-to-end latency, jitter, and NPU virtualization overhead of Halo.OS (or any centralized vehicle OS). 
+
+This enables independent verification (or refutation) of published numbers (~100 ms AEB latency, <3 ms jitter, 18–22 % NPU overhead).
+
+---
+
+## Tested Platforms
+
+- NVIDIA Jetson AGX Orin 64 GB (JetPack 6.0)
+- SemiDrive E3650 reference board
+- Ubuntu 22.04 host (x86 CI runner or Docker)
+
+---
+
+## Quick Start
+
+```bash
+# 1. Clone repo
+git clone https://github.com/open-auto-benchmarks/halo-os-perf-harness.git
+cd halo-os-perf-harness
+
+# 2. Install environment dependencies
+./ci/setup_env.sh
+
+# 3. Build the instrumented demo
+./ci/build_halo.sh
+
+# 4. Run a 5-minute 120 km/h AEB workload
+./ci/run_experiment.sh run001 300
+
+# 5. Analyze traces
+python3 ci/analyze.py results/run001/events.jsonl
+
 ## Overview
 
 This repository provides a **100% open-source, reproducible framework** to measure and validate **Halo.OS performance metrics**, including:
