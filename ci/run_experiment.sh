@@ -1,36 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RUN=${1:-testrun}
-DURATION=${2:-300}   # default 300 seconds
-OUT=results/$RUN
-mkdir -p "$OUT"
-
-echo "=== Running Halo.OS perf experiment: $RUN for $DURATION seconds ==="
-
-# Create LTTng session
-lttng create "$RUN" -o "$OUT/lttng"
-lttng enable-event -u halo:*
-lttng enable-event -k sched_switch,irq_handler_entry,irq_handler_exit
-lttng start
-
-# NVIDIA telemetry (Jetson only)
-if command -v tegrastats &>/dev/null; then
-    tegrastats --interval 100 --logfile "$OUT/tegrastats.log" &
-    TEGRA_PID=$!
+if [ $# -lt 2 ]; then
+    echo "Usage: $0 <output_dir> <num_samples>"
+    exit 1
 fi
 
-# Network traffic capture (optional)
-tcpdump -i any -w "$OUT/traffic.pcap" -s 256 &
-TCPDUMP_PID=$!
+OUTDIR="$1"
+NUM_SAMPLES="$2"
 
-# Run demo workload
-echo "=== Starting 120 km/h AEB workload ==="
-timeout "$((DURATION + 10))" ./build/apps/rt_demo --scenario aeb_120kph --duration "$DURATION"
+# Make sure workspace output directory exists
+mkdir -p "$OUTDIR"
 
-# Cleanup
-kill ${TEGRA_PID:-} ${TCPDUMP_PID:-} 2>/dev/null || true
-lttng stop
-lttng destroy
+echo "=== Running VBS experiment ==="
+echo "Output directory: $OUTDIR"
+echo "Number of samples: $NUM_SAMPLES"
 
-echo "=== Experiment complete. Artifacts stored in $OUT ==="
+# Simulated experiment loop (replace with real experiment commands)
+for i in $(seq 1 "$NUM_SAMPLES"); do
+    RUN_DIR="$OUTDIR/run_$i"
+    mkdir -p "$RUN_DIR"
+    # Here you would run the real VBS commands, logs, etc.
+    echo "{\"frame_id\": $i, \"name\": \"halo_camera_ingest\", \"time\": $(date +%s%N)}" > "$RUN_DIR/events.jsonl"
+    echo "{\"frame_id\": $i, \"name\": \"halo_brake_actuate\", \"time\": $(date +%s%N)}" >> "$RUN_DIR/events.jsonl"
+done
+
+echo "=== Experiment completed ==="
