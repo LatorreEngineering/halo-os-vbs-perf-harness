@@ -9,7 +9,6 @@ on:
 jobs:
   build-and-test:
     runs-on: ubuntu-22.04
-
     steps:
       - uses: actions/checkout@v3
 
@@ -45,19 +44,19 @@ jobs:
       - name: Run Python linter
         run: flake8 ci/analyze.py
 
-      - name: Check formatting
+      - name: Check Python formatting
         run: black --check ci/analyze.py
 
       # -------------------------------
       # Shell script linting
       # -------------------------------
-      - name: Shellcheck
-        uses: ludeeus/action-shellcheck@v1
+      - name: ShellCheck
+        uses: ludeeus/action-shellcheck@master
         with:
           files: 'ci/*.sh'
 
       # -------------------------------
-      # Run modular analysis
+      # Run modular VBS analysis
       # -------------------------------
       - name: Run VBS analysis
         run: |
