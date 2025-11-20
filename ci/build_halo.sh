@@ -3,48 +3,117 @@ set -euo pipefail
 
 echo "=== Building instrumented Halo.OS demo ==="
 
-# Use WORKSPACE env variable or default to current directory
+# ----------------------------------------
+# Workspace configuration
+# ----------------------------------------
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 MANIFEST_DIR="$WORKSPACE/manifests"
 MANIFEST_FILE="$MANIFEST_DIR/pinned_manifest.xml"
+REPO_DIR="$WORKSPACE/repo"
 
-# Create manifests directory if missing
 mkdir -p "$MANIFEST_DIR"
+mkdir -p "$REPO_DIR"
 
-# Download the pinned manifest if it doesn't exist
+# ----------------------------------------
+# Download manifest (with fallback)
+# ----------------------------------------
 if [ ! -f "$MANIFEST_FILE" ]; then
-    echo "Downloading pinned_manifest.xml from Gitee..."
-    curl -L -o "$MANIFEST_FILE" "https://gitee.com/haloos/manifest/raw/main/pinned_manifest.xml"
+    echo "Downloading pinned_manifest.xml..."
+
+    PRIMARY_URL="https://gitee.com/haloos/manifest/raw/main/pinned_manifest.xml"
+    MIRROR_URL="https://gitee.com/mirrors/haloos-manifest/raw/main/pinned_manifest.xml"
+
+    if curl -fSL "$PRIMARY_URL" -o "$MANIFEST_FILE"; then
+        echo "Downloaded manifest from primary source."
+    else
+        echo "Primary source failed, trying mirror..."
+        if curl -fSL "$MIRROR_URL" -o "$MANIFEST_FILE"; then
+            echo "Downloaded manifest from mirror."
+        else
+            echo "❌ ERROR: Failed to download manifest from both sources."
+            exit 1
+        fi
+    fi
 fi
 
-# Initialize repo inside WORKSPACE
-REPO_DIR="$WORKSPACE/repo"
-mkdir -p "$REPO_DIR"
+# ----------------------------------------
+# Initialize repo
+# ----------------------------------------
 cd "$REPO_DIR"
 
-repo init -u https://gitee.com/haloos/manifest.git -m "$MANIFEST_FILE" --repo-dir="$REPO_DIR" --quiet
-repo sync --force-sync --quiet
+# Remove stale .repo if present (common in CI)
+if [ -d ".repo" ]; then
+    echo "Cleaning up stale repo directory..."
+    rm -rf .repo
+fi
 
-# Build instrumented demo
+echo "Initializing repo..."
+
+repo init \
+    -u https://gitee.com/haloos/manifest.git \
+    --repo-dir="$REPO_DIR" \
+    --manifest-name="$(basename "$MANIFEST_FILE")" \
+    --quiet
+
+# Copy our external pinned manifest into .repo/manifests
+cp "$MANIFEST_FILE" "$REPO_DIR/.repo/manifests/"
+
+echo "Running repo sync (this may take a while)..."
+
+repo sync \
+    --force-sync \
+    --no-clone-bundle \
+    --no-tags \
+    --optimized-fetch \
+    --repo-dir="$REPO_DIR" \
+    --quiet
+
+echo "Repo sync complete."
+
+# ----------------------------------------
+# Locate and build Halo rt_demo
+# ----------------------------------------
 DEMO_DIR="$REPO_DIR/apps/rt_demo"
 BUILD_DIR="$DEMO_DIR/build"
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
 
-# Select toolchain
-if [ -f "$WORKSPACE/toolchains/jetson.cmake" ]; then
-    TOOLCHAIN_FILE="$WORKSPACE/toolchains/jetson.cmake"
-    echo "Using Jetson toolchain"
-elif [ -f "$WORKSPACE/toolchains/host.cmake" ]; then
-    TOOLCHAIN_FILE="$WORKSPACE/toolchains/host.cmake"
-    echo "Using host/x86 toolchain"
-else
-    echo "No toolchain file found. Please add one to $WORKSPACE/toolchains/"
+if [ ! -d "$DEMO_DIR" ]; then
+    echo "❌ ERROR: rt_demo directory not found at: $DEMO_DIR"
+    echo "Repo sync may have failed or manifest may be incorrect."
     exit 1
 fi
 
-cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+# ----------------------------------------
+# Toolchain detection
+# ----------------------------------------
+TOOLCHAIN_DIR="$WORKSPACE/toolchains"
+JETSON_TC="$TOOLCHAIN_DIR/jetson.cmake"
+HOST_TC="$TOOLCHAIN_DIR/host.cmake"
+
+if [ -f "$JETSON_TC" ]; then
+    TOOLCHAIN="$JETSON_TC"
+    echo "Using Jetson toolchain."
+elif [ -f "$HOST_TC" ]; then
+    TOOLCHAIN="$HOST_TC"
+    echo "Using host/x86 toolchain."
+else
+    echo "❌ ERROR: No toolchain found in $TOOLCHAIN_DIR"
+    exit 1
+fi
+
+# ----------------------------------------
+# Build (debug logs enabled)
+# ----------------------------------------
+echo "Running CMake..."
+cmake .. \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN"
+
+echo "Building..."
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
-echo "Executable located at $BUILD_DIR/rt_demo"
+echo "Executable located at:"
+echo "   $BUILD_DIR/rt_demo"
