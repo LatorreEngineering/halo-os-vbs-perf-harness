@@ -10,10 +10,13 @@ jobs:
   build-and-test:
     runs-on: ubuntu-22.04
     steps:
+      # -------------------------------
+      # Checkout repository
+      # -------------------------------
       - uses: actions/checkout@v3
 
       # -------------------------------
-      # Existing environment setup
+      # Setup environment
       # -------------------------------
       - name: Make setup_env.sh executable
         run: chmod +x ./ci/setup_env.sh
@@ -31,7 +34,7 @@ jobs:
         run: ./ci/run_experiment.sh ci_test 30
 
       # -------------------------------
-      # Python linting
+      # Python environment & linting
       # -------------------------------
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -42,10 +45,10 @@ jobs:
         run: pip install pandas matplotlib numpy flake8 black
 
       - name: Run Python linter
-        run: flake8 ci/analyze.py
+        run: flake8 ci/analyze_vbs.py
 
       - name: Check Python formatting
-        run: black --check ci/analyze.py
+        run: black --check ci/analyze_vbs.py
 
       # -------------------------------
       # Shell script linting
@@ -56,16 +59,17 @@ jobs:
           files: 'ci/*.sh'
 
       # -------------------------------
-      # Run modular VBS analysis
+      # Run VBS analysis using new analyze_vbs.py
       # -------------------------------
       - name: Run VBS analysis
         run: |
           mkdir -p results_test
-          ./run_vbs_analysis.sh \
+          python3 ci/analyze_vbs.py \
             --trace results/ci_test \
             --output results_test \
             --start_event halo_camera_ingest \
-            --end_event halo_brake_actuate
+            --end_event halo_brake_actuate \
+            --bins 30
 
       # -------------------------------
       # Validate analysis results
