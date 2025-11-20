@@ -1,0 +1,5 @@
+Samples: 2
+Mean latency : 102.0 ms
+p50          : 102.0 ms
+p99.99 jitter: 2.0 ms
+NPU virtualization overhead: 0.0%
