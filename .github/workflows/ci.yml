@@ -67,7 +67,8 @@ jobs:
       - name: Generate cache key
         id: cache-key
         run: |
-          HASH=$(sha256sum requirements.txt $REPO_MANIFEST | cut -d' ' -f1)
+          # Compute combined SHA256 hash of requirements.txt and manifest
+          HASH=$(sha256sum requirements.txt $REPO_MANIFEST | awk '{print $1}' | sha256sum | cut -d' ' -f1)
           echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
       - name: Cache dependencies
         uses: actions/cache@v4
@@ -125,8 +126,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON(format('["{0}"]', github.event.inputs.scenario)) }}
-        duration: ${{ fromJSON(format('[{0}]', github.event.inputs.duration)) }}
+        scenario: [${{ github.event.inputs.scenario || 'aeb_120kmh' }}]
+        duration: [${{ github.event.inputs.duration || '120' }}]
     steps:
       - uses: actions/checkout@v4
       - name: Download build artifacts
@@ -207,4 +208,5 @@ jobs:
     steps:
       - name: Report CI completion
         run: echo "✅ CI pipeline completed successfully. Check artifacts for details."
+
 
