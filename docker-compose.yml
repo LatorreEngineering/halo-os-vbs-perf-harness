@@ -1,20 +1,92 @@
-version: "3.8"
+version: '3.8'
 
 services:
-  halo-perf:
-    build: .
-    container_name: halo_perf_runner
-    tty: true
-    stdin_open: true
+  # ===========================================================================
+  # Main development container
+  # ===========================================================================
+  halo-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        USER_ID: ${USER_ID:-1000}
+        GROUP_ID: ${GROUP_ID:-1000}
+        USERNAME: ${USERNAME:-halodev}
+    
+    image: halo-os-perf-harness:latest
+    
+    container_name: halo-perf-harness
+    
+    # Privileged mode required for LTTng tracing
+    privileged: true
+    
+    # Network mode
+    network_mode: bridge
+    
+    # Volume mounts
     volumes:
-      - ./:/workspace
-    networks:
-      - halo-net
-    cap_add:
-      - NET_ADMIN      # Required for tcpdump
-      - SYS_ADMIN
-    privileged: true   # Needed for packet capture and LTTng kernel modules
+      # Mount source code
+      - .:/workspace:rw
+      
+      # Persistent cache directories
+      - build-cache:/workspace/build
+      - ccache:/workspace/.ccache
+      - pip-cache:/home/halodev/.cache/pip
+      
+      # Persistent results
+      - ./results:/workspace/results:rw
+      - ./logs:/workspace/logs:rw
+    
+    # Environment variables
+    environment:
+      - RUNNING_IN_DOCKER=1
+      - CMAKE_GENERATOR=Ninja
+      - CMAKE_BUILD_TYPE=RelWithDebInfo
+      - PYTHONUNBUFFERED=1
+      - CCACHE_DIR=/workspace/.ccache
+      - TZ=UTC
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '8'
+          memory: 16G
+        reservations:
+          cpus: '4'
+          memory: 8G
+    
+    # Keep container running
+    stdin_open: true
+    tty: true
+    
+    # Working directory
+    working_dir: /workspace
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
 
+# ===========================================================================
+# Named volumes for persistence
+# ===========================================================================
+volumes:
+  build-cache:
+    driver: local
+  
+  ccache:
+    driver: local
+  
+  pip-cache:
+    driver: local
+
+# ===========================================================================
+# Networks
+# ===========================================================================
 networks:
-  halo-net:
+  default:
     driver: bridge
