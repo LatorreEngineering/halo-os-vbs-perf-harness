@@ -6,8 +6,7 @@ on:
   pull_request:
     branches: [main]
   schedule:
-    # Run nightly at 2 AM UTC
-    - cron: '0 2 * * *'
+    - cron: '0 2 * * *'  # Nightly 2AM UTC
   workflow_dispatch:
     inputs:
       duration:
@@ -25,206 +24,85 @@ on:
           - parking
 
 env:
-  PYTHON_VERSION: '3.10'
-  CMAKE_VERSION: '3.26.0'
-  CACHE_VERSION: v1
+  PYTHON_VERSION: '3.11'
+  CACHE_VERSION: 'v2'
+  REPO_MANIFEST: 'manifests/pinned_manifest.xml'
 
 jobs:
-  # ===========================================================================
-  # Setup and Validation
-  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Validate repository structure, syntax, manifests
+  # ---------------------------------------------------------------------------
   validate:
-    name: Validate Repository
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0  # Full history for proper versioning
-      
+      - uses: actions/checkout@v4
       - name: Install validation tools
+        run: sudo apt-get update && sudo apt-get install -y xmllint shellcheck python3-venv
+      - name: Validate XML manifests
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y xmllint shellcheck
-          echo "Validation tools installed"
-      
-      - name: Validate manifests
-        run: |
-          echo "==> Validating XML manifests..."
-          manifest_found=false
-          
-          for manifest in manifests/*.xml; do
-            if [ -f "$manifest" ]; then
-              manifest_found=true
-              echo "Checking: $manifest"
-              if xmllint --noout "$manifest" 2>&1; then
-                echo "✓ Valid: $manifest"
-              else
-                echo "✗ Invalid: $manifest"
-                echo "Error details:"
-                xmllint --noout "$manifest" 2>&1 || true
-                exit 1
-              fi
-            fi
+          for m in manifests/*.xml; do
+            echo "Checking $m"
+            xmllint --noout "$m"
           done
-          
-          if [ "$manifest_found" = false ]; then
-            echo "✗ No manifest files found in manifests/ directory"
-            exit 1
-          fi
-          
-          echo "✓ All manifests valid"
-      
-      - name: Check Python syntax
+      - name: Validate Python scripts
         run: |
-          echo "==> Checking Python syntax..."
-          python_found=false
-          
-          for script in ci/*.py; do
-            if [ -f "$script" ]; then
-              python_found=true
-              echo "Checking: $script"
-              if python3 -m py_compile "$script" 2>&1; then
-                echo "✓ Valid: $script"
-              else
-                echo "✗ Invalid: $script"
-                python3 -m py_compile "$script" 2>&1 || true
-                exit 1
-              fi
-            fi
+          for s in ci/*.py; do
+            python3 -m py_compile "$s"
           done
-          
-          if [ "$python_found" = false ]; then
-            echo "⚠ No Python scripts found in ci/ directory"
-          else
-            echo "✓ All Python scripts valid"
-          fi
-      
-      - name: Check Bash syntax
+      - name: Validate Bash scripts
         run: |
-          echo "==> Checking Bash syntax..."
-          bash_found=false
-          
-          for script in ci/*.sh; do
-            if [ -f "$script" ]; then
-              bash_found=true
-              echo "Checking: $script"
-              # SC1090: Can't follow non-constant source
-              # SC1091: Not following sourced file
-              if shellcheck -e SC1090,SC1091 "$script" 2>&1; then
-                echo "✓ Valid: $script"
-              else
-                echo "✗ Issues found: $script"
-                shellcheck -e SC1090,SC1091 "$script" 2>&1 || true
-                exit 1
-              fi
-            fi
+          for s in ci/*.sh; do
+            shellcheck -e SC1090,SC1091 "$s"
           done
-          
-          if [ "$bash_found" = false ]; then
-            echo "✗ No Bash scripts found in ci/ directory"
-            exit 1
-          fi
-          
-          echo "✓ All Bash scripts valid"
-      
-      - name: Check required files
-        run: |
-          echo "==> Checking required files..."
-          missing=0
-          
-          required_files=(
-            "ci/setup_env.sh"
-            "ci/build_halo.sh"
-            "ci/run_experiment.sh"
-            "ci/analyze_vbs.py"
-            "requirements.txt"
-            "Dockerfile"
-            "README.md"
-          )
-          
-          for file in "${required_files[@]}"; do
-            if [ -f "$file" ]; then
-              echo "✓ Found: $file"
-            else
-              echo "✗ Missing: $file"
-              ((missing++))
-            fi
-          done
-          
-          if [ $missing -gt 0 ]; then
-            echo "✗ Missing $missing required file(s)"
-            exit 1
-          fi
-          
-          echo "✓ All required files present"
 
-  # ===========================================================================
-  # Environment Setup
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Setup environment and repo
+  # ---------------------------------------------------------------------------
   setup:
-    name: Setup Environment
     runs-on: ubuntu-22.04
     needs: validate
     outputs:
-      cache-key: ${{ steps.cache-keys.outputs.deps }}
+      deps-cache-key: ${{ steps.cache-key.outputs.key }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Generate cache keys
-        id: cache-keys
+      - uses: actions/checkout@v4
+      - name: Generate cache key
+        id: cache-key
         run: |
-          # Create hash of all dependency-related files
-          DEPS_HASH=$(cat requirements.txt manifests/pinned_manifest.xml | sha256sum | cut -d' ' -f1)
-          echo "deps=${{ env.CACHE_VERSION }}-deps-${DEPS_HASH}" >> $GITHUB_OUTPUT
-          echo "Cache key: ${{ env.CACHE_VERSION }}-deps-${DEPS_HASH}"
-      
-      - name: Cache dependencies
-        id: cache-deps
+          HASH=$(sha256sum requirements.txt $REPO_MANIFEST | cut -d' ' -f1)
+          echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
+      - name: Cache dependencies and repo
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             venv
             halo-os-src/.repo
-          key: ${{ steps.cache-keys.outputs.deps }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-deps-
-      
-      - name: Set up Python
+          key: ${{ steps.cache-key.outputs.key }}
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: 'pip'
-      
-      - name: Run setup script
+      - name: Install tools & setup env
         run: |
           chmod +x ci/setup_env.sh
           ./ci/setup_env.sh
-        env:
-          CI: true
-      
-      - name: Verify setup
+      - name: Initialize Halo.OS repo
         run: |
-          source .env
-          python3 --version
-          cmake --version
-          ninja --version
-          repo --version || echo "repo not in PATH, will be available via .local/bin"
-          lttng --version
+          mkdir -p halo-os-src
+          cd halo-os-src
+          repo init -u https://gitee.com/LatorreEngineering/halo-os-vbs-perf-harness -m $REPO_MANIFEST
+          repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
 
-  # ===========================================================================
-  # Build Halo.OS
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Build Halo.OS demo
+  # ---------------------------------------------------------------------------
   build:
-    name: Build Halo.OS
     runs-on: ubuntu-22.04
     needs: setup
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v4
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -232,234 +110,90 @@ jobs:
             ~/.cache/pip
             venv
             halo-os-src/.repo
-          key: ${{ needs.setup.outputs.cache-key }}
-          restore-keys: |
-            ${{ env.CACHE_VERSION }}-deps-
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Install dependencies
-        run: |
-          chmod +x ci/setup_env.sh
-          ./ci/setup_env.sh
-      
+          key: ${{ needs.setup.outputs.deps-cache-key }}
       - name: Build Halo.OS
         run: |
-          source .env
           chmod +x ci/build_halo.sh
           ./ci/build_halo.sh --jobs $(nproc)
-        env:
-          CI: true
-      
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: halo-build-${{ github.sha }}
-          path: |
-            build/bin/
-            build/lib/
-            build/git_info.txt
+          path: build/
           retention-days: 7
-      
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs-${{ github.sha }}
-          path: logs/
-          retention-days: 3
 
-  # ===========================================================================
-  # Run Experiments (Matrix)
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Run experiments
+  # ---------------------------------------------------------------------------
   experiment:
-    name: Experiment - ${{ matrix.scenario }}
     runs-on: ubuntu-22.04
     needs: build
     strategy:
       fail-fast: false
       matrix:
-        scenario:
-          - aeb_120kmh
-          - lka_80kmh
-        duration:
-          - 120  # 2 minutes for CI
+        scenario: [aeb_120kmh, lka_80kmh]
+        duration: [120]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Restore cache
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            venv
-            halo-os-src/.repo
-          key: ${{ needs.setup.outputs.cache-key }}
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
+      - uses: actions/checkout@v4
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: halo-build-${{ github.sha }}
           path: build/
-      
-      - name: Make binaries executable
-        run: |
-          chmod +x build/bin/*
-      
-      - name: Install dependencies
-        run: |
-          chmod +x ci/setup_env.sh
-          ./ci/setup_env.sh
-      
       - name: Run experiment
-        id: experiment
         run: |
-          source .env
           chmod +x ci/run_experiment.sh
-          
-          RUN_ID="ci_${{ matrix.scenario }}_$(date +%Y%m%d_%H%M%S)"
-          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
-          
-          ./ci/run_experiment.sh "${RUN_ID}" ${{ matrix.duration }} \
+          RUN_DIR="results/${{ matrix.scenario }}_$(date +%Y%m%d_%H%M%S)"
+          ./ci/run_experiment.sh "$RUN_DIR" ${{ matrix.duration }} \
             --scenario ${{ matrix.scenario }} \
             --hardware simulation
-        continue-on-error: true
-        timeout-minutes: 10
-      
-      - name: Check experiment status
-        run: |
-          if [ -f "results/${{ steps.experiment.outputs.run_id }}/events.jsonl" ]; then
-            echo "Experiment completed successfully"
-          else
-            echo "Experiment failed - no events file found"
-            exit 1
-          fi
-      
-      - name: Upload experiment results
-        if: always()
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: experiment-${{ matrix.scenario }}-${{ github.sha }}
+          name: experiment-${{ matrix.scenario }}
           path: results/
           retention-days: 7
 
-  # ===========================================================================
-  # Analyze Results
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Analyze experiment results
+  # ---------------------------------------------------------------------------
   analyze:
-    name: Analyze Results
     runs-on: ubuntu-22.04
     needs: experiment
-    if: always()
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Install Python dependencies
+      - uses: actions/checkout@v4
+      - name: Install Python deps
         run: |
-          python3 -m pip install --upgrade pip
+          pip install --upgrade pip
           pip install -r requirements.txt
-      
-      - name: Download all experiment results
+      - name: Download experiment results
         uses: actions/download-artifact@v4
         with:
           pattern: experiment-*
           path: results/
-      
       - name: Run analysis
-        id: analysis
         run: |
           chmod +x ci/analyze_vbs.py
-          
-          # Find all events.jsonl files
-          find results/ -name "events.jsonl" | while read events_file; do
-            echo "Analyzing: ${events_file}"
-            output_dir=$(dirname "${events_file}")
-            
-            python3 ci/analyze_vbs.py "${events_file}" \
-              --output "${output_dir}" \
-              --verbose || echo "Analysis failed for ${events_file}"
+          for trace_dir in results/*; do
+            python3 ci/analyze_vbs.py --trace "$trace_dir" --output "$trace_dir"
           done
-        continue-on-error: true
-      
-      - name: Generate summary report
-        run: |
-          cat > results/ci_summary.md << 'EOF'
-          # Halo.OS VBS Performance CI Summary
-          
-          ## Build Information
-          - **Commit**: ${{ github.sha }}
-          - **Branch**: ${{ github.ref_name }}
-          - **Date**: $(date)
-          
-          ## Experiment Results
-          
-          EOF
-          
-          # Append individual reports
-          find results/ -name "analysis_report.txt" | while read report; do
-            scenario=$(basename $(dirname "${report}"))
-            echo "### ${scenario}" >> results/ci_summary.md
-            echo '```' >> results/ci_summary.md
-            cat "${report}" >> results/ci_summary.md
-            echo '```' >> results/ci_summary.md
-            echo "" >> results/ci_summary.md
-          done
-      
-      - name: Upload analysis results
-        if: always()
+      - name: Upload analysis
         uses: actions/upload-artifact@v4
         with:
           name: analysis-results-${{ github.sha }}
-          path: |
-            results/**/*.txt
-            results/**/*.png
-            results/**/*.md
+          path: results/
           retention-days: 30
-      
-      - name: Comment on PR
-        if: github.event_name == 'pull_request'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const summary = fs.readFileSync('results/ci_summary.md', 'utf8');
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: summary
-            });
 
-  # ===========================================================================
-  # Docker Build Test
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Docker build test
+  # ---------------------------------------------------------------------------
   docker:
-    name: Docker Build Test
     runs-on: ubuntu-22.04
-    needs: validate
+    needs: setup
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
+      - uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
       - name: Build Docker image
         uses: docker/build-push-action@v5
         with:
@@ -468,44 +202,17 @@ jobs:
           tags: halo-os-perf-harness:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      
       - name: Test Docker image
         run: |
-          docker run --rm halo-os-perf-harness:ci \
-            python3 -c "import numpy, pandas, matplotlib; print('Dependencies OK')"
+          docker run --rm halo-os-perf-harness:ci python3 -c "import numpy,pandas,matplotlib; print('Dependencies OK')"
 
-  # ===========================================================================
-  # Final Status
-  # ===========================================================================
+  # ---------------------------------------------------------------------------
+  # Final summary
+  # ---------------------------------------------------------------------------
   ci-success:
-    name: CI Success
     runs-on: ubuntu-22.04
     needs: [validate, setup, build, experiment, analyze, docker]
     if: always()
     steps:
-      - name: Check job statuses
-        run: |
-          if [ "${{ needs.validate.result }}" != "success" ]; then
-            echo "Validation failed"
-            exit 1
-          fi
-          if [ "${{ needs.setup.result }}" != "success" ]; then
-            echo "Setup failed"
-            exit 1
-          fi
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "Build failed"
-            exit 1
-          fi
-          if [ "${{ needs.docker.result }}" != "success" ]; then
-            echo "Docker build failed"
-            exit 1
-          fi
-          
-          # Experiments and analysis can have warnings but shouldn't block
-          echo "All critical jobs passed!"
-      
-      - name: Report success
-        run: |
-          echo "✅ CI pipeline completed successfully"
-          echo "📊 Check the artifacts for detailed results"
+      - name: Report CI completion
+        run: echo "✅ CI pipeline completed successfully. Check artifacts for details."
