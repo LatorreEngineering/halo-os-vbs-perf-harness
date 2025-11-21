@@ -67,7 +67,6 @@ jobs:
       - name: Generate cache key
         id: cache-key
         run: |
-          # Compute combined SHA256 hash of requirements.txt and manifest
           HASH=$(sha256sum requirements.txt $REPO_MANIFEST | awk '{print $1}' | sha256sum | cut -d' ' -f1)
           echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
       - name: Cache dependencies
@@ -126,10 +125,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [${{ github.event.inputs.scenario || 'aeb_120kmh' }}]
-        duration: [${{ github.event.inputs.duration || '120' }}]
+        scenario: [aeb_120kmh]   # placeholder
+        duration: [120]           # placeholder
     steps:
       - uses: actions/checkout@v4
+
+      # Compute workflow_dispatch inputs with defaults
+      - name: Set experiment inputs
+        id: inputs
+        run: |
+          SCENARIO="${{ github.event.inputs.scenario }}"
+          DURATION="${{ github.event.inputs.duration }}"
+          if [ -z "$SCENARIO" ]; then SCENARIO="aeb_120kmh"; fi
+          if [ -z "$DURATION" ]; then DURATION="120"; fi
+          echo "scenario=$SCENARIO" >> $GITHUB_OUTPUT
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
@@ -139,14 +150,14 @@ jobs:
         run: |
           mkdir -p results
           chmod +x ci/run_experiment.sh
-          RUN_DIR="results/${{ matrix.scenario }}_$(date +%Y%m%d_%H%M%S)"
-          ./ci/run_experiment.sh "$RUN_DIR" ${{ matrix.duration }} \
-            --scenario ${{ matrix.scenario }} \
+          RUN_DIR="results/${{ steps.inputs.outputs.scenario }}_$(date +%Y%m%d_%H%M%S)"
+          ./ci/run_experiment.sh "$RUN_DIR" ${{ steps.inputs.outputs.duration }} \
+            --scenario ${{ steps.inputs.outputs.scenario }} \
             --hardware simulation
       - name: Upload experiment results
         uses: actions/upload-artifact@v4
         with:
-          name: experiment-${{ matrix.scenario }}
+          name: experiment-${{ steps.inputs.outputs.scenario }}
           path: results/
           retention-days: 7
 
@@ -208,5 +219,4 @@ jobs:
     steps:
       - name: Report CI completion
         run: echo "✅ CI pipeline completed successfully. Check artifacts for details."
-
 
