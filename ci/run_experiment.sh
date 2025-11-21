@@ -39,7 +39,9 @@ HALO_PID=""
 cleanup() {
     log "Cleaning up..."
     if [[ -n "$HALO_PID" ]]; then
-        kill -0 "$HALO_PID" 2>/dev/null && kill -TERM "$HALO_PID" 2>/dev/null || true
+        if kill -0 "$HALO_PID" 2>/dev/null; then
+            kill -TERM "$HALO_PID" 2>/dev/null || true
+        fi
     fi
     if [[ -n "$LTTNG_SESSION" ]]; then
         lttng destroy "$LTTNG_SESSION" 2>/dev/null || true
@@ -93,7 +95,9 @@ detect_hardware() {
     local platform="unknown"
 
     [[ -f /etc/nv_tegra_release ]] && platform="jetson"
-    lspci 2>/dev/null | grep -qi "semidrive" && platform="semidrive"
+    if lspci 2>/dev/null | grep -qi "semidrive"; then
+        platform="semidrive"
+    fi
     [[ $(uname -m) == "x86_64" ]] && platform="x86_simulation"
 
     [[ "$HARDWARE_MODE" != "auto" ]] && platform="$HARDWARE_MODE"
@@ -175,7 +179,8 @@ EOF
 # Monitor
 # ==================================================================
 monitor_experiment() {
-    local elapsed=0 check_interval=10
+    local elapsed=0
+    local check_interval=10
     while [[ $elapsed -lt $DURATION ]]; do
         kill -0 "$HALO_PID" 2>/dev/null || fatal "Halo.OS crashed"
         sleep "$check_interval"
@@ -192,9 +197,13 @@ stop_and_collect() {
         lttng stop "$LTTNG_SESSION" || true
     fi
     if [[ -n "$HALO_PID" ]]; then
-        kill -TERM "$HALO_PID" 2>/dev/null || true
+        if kill -0 "$HALO_PID" 2>/dev/null; then
+            kill -TERM "$HALO_PID" 2>/dev/null || true
+        fi
         sleep 2
-        kill -0 "$HALO_PID" 2>/dev/null && kill -KILL "$HALO_PID" 2>/dev/null || true
+        if kill -0 "$HALO_PID" 2>/dev/null; then
+            kill -KILL "$HALO_PID" 2>/dev/null || true
+        fi
     fi
 
     local trace_dir="$RUN_DIR/traces"
@@ -214,7 +223,9 @@ stop_and_collect() {
 # Validation
 # ==================================================================
 validate_results() {
-    local errors=0 events_file="$RUN_DIR/events.jsonl"
+    local errors=0
+    local events_file="$RUN_DIR/events.jsonl"
+
     if [[ ! -f "$events_file" ]]; then
         log "Events missing"
         ((errors++))
@@ -226,6 +237,7 @@ validate_results() {
     if [[ -f "$RUN_DIR/halo_stderr.log" ]]; then
         grep -qi "fatal\|critical\|segfault" "$RUN_DIR/halo_stderr.log" && ((errors++))
     fi
+
     [[ $errors -gt 0 ]] && return 1
     log "Validation passed"
 }
@@ -246,6 +258,7 @@ main() {
     run_halo_os
     monitor_experiment
     stop_and_collect
+
     if validate_results; then
         log "Experiment completed successfully"
     else
@@ -254,3 +267,4 @@ main() {
 }
 
 main "$@"
+
