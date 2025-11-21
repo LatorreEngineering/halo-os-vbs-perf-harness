@@ -54,9 +54,10 @@ if [ -z "${GITHUB_ACTIONS:-}" ]; then
         REPO_URL="https://${GITEE_TOKEN}@gitee.com/haloos/manifest.git"
     fi
 
-    echo "Initializing repo..."
+    echo "[INFO] Initializing repo..."
     repo init -u "$REPO_URL" -m "$MANIFEST_PATH" --quiet
-    echo "Syncing repo..."
+
+    echo "[INFO] Syncing repo..."
     repo sync -j"$(nproc)" --force-sync --quiet
 else
     echo "[CI] Repo already initialized and synced by workflow"
@@ -83,15 +84,15 @@ cd "$BUILD_DIR"
 TOOLCHAIN_FILE=""
 if [ -f "$REPO_DIR/toolchains/jetson.cmake" ]; then
     TOOLCHAIN_FILE="$REPO_DIR/toolchains/jetson.cmake"
-    echo "[INFO] Using repo Jetson toolchain"
+    echo "[INFO] Using Jetson toolchain from repo"
 elif [ -f "$REPO_DIR/toolchains/host.cmake" ]; then
     TOOLCHAIN_FILE="$REPO_DIR/toolchains/host.cmake"
-    echo "[INFO] Using repo host/x86 toolchain"
+    echo "[INFO] Using host/x86 toolchain from repo"
 elif [ -f "$WORKSPACE/toolchains/host.cmake" ]; then
     TOOLCHAIN_FILE="$WORKSPACE/toolchains/host.cmake"
-    echo "[INFO] Using workspace host toolchain"
+    echo "[INFO] Using host/x86 toolchain from workspace"
 else
-    echo "❌ Error: No toolchain found in repo or workspace"
+    echo "❌ Error: No toolchain found"
     exit 1
 fi
 
@@ -99,10 +100,12 @@ fi
 # Build with CMake
 # ------------------------------------------------------------
 echo "[INFO] Configuring CMake..."
-cmake "$DEMO_DIR" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
+cmake "$DEMO_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_TOOLCHAIN_FILE="$TOOLCHAIN_FILE"
 
 echo "[INFO] Building..."
 make -j"$(nproc)"
 
 echo "=== Build complete ==="
-echo "Executable located at $BUILD_DIR/rt_demo"
+echo "Executable: $BUILD_DIR/rt_demo"
