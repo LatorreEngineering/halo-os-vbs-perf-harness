@@ -5,8 +5,11 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# ===================== SC2155 Fix =====================
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+readonly SCRIPT_DIR
+PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+readonly PROJECT_ROOT
 
 # Source environment
 [[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
@@ -35,8 +38,12 @@ HALO_PID=""
 
 cleanup() {
     log "Cleaning up..."
-    [[ -n "$HALO_PID" ]] && kill -0 "$HALO_PID" 2>/dev/null && kill -TERM "$HALO_PID" 2>/dev/null || true
-    [[ -n "$LTTNG_SESSION" ]] && lttng destroy "$LTTNG_SESSION" 2>/dev/null || true
+    if [[ -n "$HALO_PID" ]]; then
+        kill -0 "$HALO_PID" 2>/dev/null && kill -TERM "$HALO_PID" 2>/dev/null || true
+    fi
+    if [[ -n "$LTTNG_SESSION" ]]; then
+        lttng destroy "$LTTNG_SESSION" 2>/dev/null || true
+    fi
 }
 
 trap cleanup EXIT INT TERM
@@ -181,16 +188,26 @@ monitor_experiment() {
 # Stop & Collect
 # ==================================================================
 stop_and_collect() {
-    [[ -n "$LTTNG_SESSION" ]] && lttng stop "$LTTNG_SESSION" || true
-    [[ -n "$HALO_PID" ]] && kill -TERM "$HALO_PID" 2>/dev/null || true
-    sleep 2
-    [[ -n "$HALO_PID" ]] && kill -0 "$HALO_PID" 2>/dev/null && kill -KILL "$HALO_PID" 2>/dev/null || true
+    if [[ -n "$LTTNG_SESSION" ]]; then
+        lttng stop "$LTTNG_SESSION" || true
+    fi
+    if [[ -n "$HALO_PID" ]]; then
+        kill -TERM "$HALO_PID" 2>/dev/null || true
+        sleep 2
+        kill -0 "$HALO_PID" 2>/dev/null && kill -KILL "$HALO_PID" 2>/dev/null || true
+    fi
 
     local trace_dir="$RUN_DIR/traces"
     local events_file="$RUN_DIR/events.jsonl"
-    command -v babeltrace2 >/dev/null && babeltrace2 --output-format=json "$trace_dir" > "$events_file" || log "babeltrace2 missing, skipping trace conversion"
+    if command -v babeltrace2 >/dev/null; then
+        babeltrace2 --output-format=json "$trace_dir" > "$events_file" || log "babeltrace2 failed"
+    else
+        log "babeltrace2 missing, skipping trace conversion"
+    fi
 
-    [[ -n "$LTTNG_SESSION" ]] && lttng destroy "$LTTNG_SESSION" || true
+    if [[ -n "$LTTNG_SESSION" ]]; then
+        lttng destroy "$LTTNG_SESSION" || true
+    fi
 }
 
 # ==================================================================
@@ -198,9 +215,17 @@ stop_and_collect() {
 # ==================================================================
 validate_results() {
     local errors=0 events_file="$RUN_DIR/events.jsonl"
-    [[ ! -f "$events_file" ]] && { log "Events missing"; ((errors++)); }
-    [[ ! -s "$RUN_DIR/halo_stdout.log" ]] && { log "Stdout missing"; ((errors++)); }
-    [[ -f "$RUN_DIR/halo_stderr.log" ]] && grep -qi "fatal\|critical\|segfault" "$RUN_DIR/halo_stderr.log" && ((errors++))
+    if [[ ! -f "$events_file" ]]; then
+        log "Events missing"
+        ((errors++))
+    fi
+    if [[ ! -s "$RUN_DIR/halo_stdout.log" ]]; then
+        log "Stdout missing"
+        ((errors++))
+    fi
+    if [[ -f "$RUN_DIR/halo_stderr.log" ]]; then
+        grep -qi "fatal\|critical\|segfault" "$RUN_DIR/halo_stderr.log" && ((errors++))
+    fi
     [[ $errors -gt 0 ]] && return 1
     log "Validation passed"
 }
@@ -221,7 +246,11 @@ main() {
     run_halo_os
     monitor_experiment
     stop_and_collect
-    validate_results && log "Experiment completed successfully" || fatal "Validation failed"
+    if validate_results; then
+        log "Experiment completed successfully"
+    else
+        fatal "Validation failed"
+    fi
 }
 
 main "$@"
