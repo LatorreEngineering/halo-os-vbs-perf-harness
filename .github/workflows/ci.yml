@@ -57,53 +57,41 @@ jobs:
           done
 
   # 2️⃣ Setup environment
-setup:
-  runs-on: ubuntu-22.04
-  needs: validate
-  outputs:
-    deps-cache-key: ${{ steps.cache-key.outputs.key }}
-  steps:
-    - uses: actions/checkout@v4
-
-    # Generate cache key
-    - name: Generate cache key
-      id: cache-key
-      run: |
-        HASH=$(sha256sum requirements.txt $REPO_MANIFEST | awk '{print $1}' | sha256sum | cut -d' ' -f1)
-        echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
-
-    # Restore / cache dependencies
-    - name: Cache dependencies
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.cache/pip
-          venv
-          halo-os-src/.repo
-        key: ${{ steps.cache-key.outputs.key }}
-
-    # Setup Python
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: pip
-
-    # Install tools and setup environment
-    - name: Install tools & setup env
-      run: |
-        chmod +x ci/setup_env.sh
-        ./ci/setup_env.sh
-
-    # Initialize Halo.OS repo using fully public URLs
-    - name: Initialize Halo.OS repo
-      run: |
-        mkdir -p halo-os-src
-        cd halo-os-src
-        # Force using public URLs from pinned_manifest.xml to avoid Gitee auth
-        repo init -u https://gitee.com/haloos/manifests.git -m pinned_manifest.xml --repo-url https://gitee.com
-        repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
-
+  setup:
+    runs-on: ubuntu-22.04
+    needs: validate
+    outputs:
+      deps-cache-key: ${{ steps.cache-key.outputs.key }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate cache key
+        id: cache-key
+        run: |
+          HASH=$(sha256sum requirements.txt $REPO_MANIFEST | awk '{print $1}' | sha256sum | cut -d' ' -f1)
+          echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
+      - name: Cache dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv
+            halo-os-src/.repo
+          key: ${{ steps.cache-key.outputs.key }}
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+      - name: Install tools & setup env
+        run: |
+          chmod +x ci/setup_env.sh
+          ./ci/setup_env.sh
+      - name: Initialize Halo.OS repo
+        run: |
+          mkdir -p halo-os-src
+          cd halo-os-src
+          repo init -u https://gitee.com/haloos/manifests.git -m pinned_manifest.xml --repo-url https://gitee.com
+          repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
 
   # 3️⃣ Build Halo.OS
   build:
@@ -137,12 +125,10 @@ setup:
     strategy:
       fail-fast: false
       matrix:
-        scenario: [aeb_120kmh]   # placeholder
-        duration: [120]           # placeholder
+        scenario: [aeb_120kmh]
+        duration: [120]
     steps:
       - uses: actions/checkout@v4
-
-      # Compute workflow_dispatch inputs with defaults
       - name: Set experiment inputs
         id: inputs
         run: |
@@ -152,7 +138,6 @@ setup:
           if [ -z "$DURATION" ]; then DURATION="120"; fi
           echo "scenario=$SCENARIO" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
-
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
