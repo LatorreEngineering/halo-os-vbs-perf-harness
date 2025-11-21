@@ -32,51 +32,55 @@ jobs:
         run: ./ci/setup_env.sh
 
       # -------------------------------
-      # Install 'repo' tool   (FIXED)
+      # Install 'repo' tool
       # -------------------------------
       - name: Install repo tool
         run: |
           mkdir -p ~/bin
           curl -sSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
           chmod a+x ~/bin/repo
-
-          # Add to PATH for FUTURE steps
           echo "$HOME/bin" >> $GITHUB_PATH
-
-          # Add to PATH for THIS step
           export PATH="$HOME/bin:$PATH"
-
           repo --version
 
       # -------------------------------
-      # Initialize & Sync Repo with retries
+      # Initialize & Sync Halo.OS manifests
       # -------------------------------
-      - name: Initialize & Sync Repo
+      - name: Initialize & Sync Halo.OS
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           set -e
+          HALO_WS="$WORKSPACE/halo_os_workspace"
+          mkdir -p "$HALO_WS"
+          cd "$HALO_WS"
+
+          # Optional: rewrite URLs to include token for private repos
+          if [ -n "${GITEE_TOKEN:-}" ]; then
+            git config --global url."https://${GITEE_TOKEN}:x-oauth-basic@gitee.com/".insteadOf "https://gitee.com/"
+          fi
+
+          # Initialize manifest
+          repo init -u https://gitee.com/haloos/manifests.git
+
+          # Sync with retries
           MAX_RETRIES=3
-          RETRY_DELAY=10
-          count=0
-          while [ $count -lt $MAX_RETRIES ]; do
-            echo "Attempt $((count+1)) to init & sync repo"
-            if repo init -u https://github.com/LatorreEngineering/halo-os-vbs-perf-harness; then
-              if repo sync -j$(nproc); then
-                echo "Repo synced successfully"
-                break
-              fi
-            fi
-            count=$((count+1))
-            echo "Repo sync failed, retrying in $RETRY_DELAY seconds..."
-            sleep $RETRY_DELAY
+          SLEEP=10
+          n=0
+          until [ $n -ge $MAX_RETRIES ]; do
+            repo sync -j$(nproc) && break
+            n=$((n+1))
+            echo "repo sync failed; retrying in ${SLEEP}s (attempt $n/$MAX_RETRIES)"
+            sleep $SLEEP
           done
 
-          if [ $count -eq $MAX_RETRIES ]; then
-            echo "❌ Repo init/sync failed after $MAX_RETRIES attempts"
+          if [ $n -ge $MAX_RETRIES ]; then
+            echo "❌ Repo sync failed after $MAX_RETRIES attempts"
             exit 1
           fi
 
       # -------------------------------
-      # Cache Python dependencies (FIXED YAML)
+      # Cache Python packages
       # -------------------------------
       - name: Cache Python packages
         uses: actions/cache@v3
@@ -92,7 +96,7 @@ jobs:
           python-version: 3.11
 
       - name: Install Python dependencies
-        run: pip install --upgrade pip && pip install pandas matplotlib numpy flake8 black
+        run: pip install --upgrade pip && pip install -r requirements.txt
 
       # -------------------------------
       # Cache Halo build artifacts
@@ -107,19 +111,17 @@ jobs:
             halo-build-${{ runner.os }}-
 
       # -------------------------------
-      # Build Halo.OS demo (conditional)
+      # Build Halo.OS demo
       # -------------------------------
       - name: Build Halo.OS demo
         if: steps.halo-cache.outputs.cache-hit != 'true'
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: ./ci/build_halo.sh
 
       # -------------------------------
       # Run sample experiment
       # -------------------------------
       - name: Run sample experiment
-        run: ./ci/run_experiment.sh ci_test 30
+        run: ./ci/run_experiment.sh results_test 30
 
       # -------------------------------
       # Cache VBS analysis results
@@ -129,23 +131,16 @@ jobs:
         uses: actions/cache@v3
         with:
           path: results_test
-          key: analysis-results-${{ runner.os }}-${{ hashFiles('results/ci_test/**/*') }}
+          key: analysis-results-${{ runner.os }}-${{ hashFiles('results_test/**/*') }}
           restore-keys: |
             analysis-results-${{ runner.os }}-
 
       # -------------------------------
-      # Run VBS analysis (conditional)
+      # Run VBS analysis
       # -------------------------------
       - name: Run VBS analysis
         if: steps.analysis-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p results_test
-          python3 ci/analyze_vbs.py \
-            --trace results/ci_test \
-            --output results_test \
-            --start_event halo_camera_ingest \
-            --end_event halo_brake_actuate \
-            --bins 30
+        run: python3 ci/analyze_vbs.py --trace results_test --output results_test --start_event halo_camera_ingest --end_event halo_brake_actuate --bins 30
 
       # -------------------------------
       # Python linting
