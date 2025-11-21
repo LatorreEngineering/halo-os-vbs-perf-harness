@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+
+  <remote name="github" fetch="https://github.com/" />
+
+  <default revision="main" remote="github" sync-j="4" />
+
+  <!-- Pin exact SHAs -->
+
+  <project
+      name="LatorreEngineering/halo-os-vbs-perf-harness"
+      path="halo-os-vbs-perf-harness"
+      revision="main" />
+
+  <project
+      name="LatorreEngineering/halo-os"
+      path="halo-os"
+      revision="FETCH_LATEST_AND_PIN" />
+
+  <project
+      name="LatorreEngineering/halo-vbs"
+      path="halo-vbs"
+      revision="FETCH_LATEST_AND_PIN" />
+
+  <project
+      name="LatorreEngineering/halo-middleware"
+      path="halo-middleware"
+      revision="FETCH_LATEST_AND_PIN" />
+
+  <project
+      name="LatorreEngineering/halo-hw-abstraction"
+      path="halo-hw-abstraction"
+      revision="FETCH_LATEST_AND_PIN" />
+
+</manifest>
