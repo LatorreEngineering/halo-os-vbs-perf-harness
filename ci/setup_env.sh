@@ -3,24 +3,29 @@ set -euo pipefail
 
 echo "=== Setting up Halo.OS performance harness environment ==="
 
-# Workspace directory
+# ------------------------------------------------------------
+# Workspace and results directory
+# ------------------------------------------------------------
 WORKSPACE="${WORKSPACE:-$(pwd)}"
 RESULTS_DIR="${WORKSPACE}/results"
+mkdir -p "$RESULTS_DIR"
+echo "[INFO] Results directory: $RESULTS_DIR"
 
+# ------------------------------------------------------------
 # Detect privileged mode
+# ------------------------------------------------------------
 SUDO=""
 if [ "$EUID" -ne 0 ]; then
     SUDO="sudo"
 fi
 
 # ------------------------------------------------------------
-# Detect environment
+# Detect environment: Local vs CI
 # ------------------------------------------------------------
 if [ -z "${GITHUB_ACTIONS:-}" ]; then
     echo "[LOCAL DEV] Installing system dependencies..."
-    $SUDO apt-get update
+    $SUDO apt-get update -qq
 
-    # Minimal required packages
     PKGS=(
         build-essential
         cmake
@@ -38,14 +43,14 @@ if [ -z "${GITHUB_ACTIONS:-}" ]; then
         iproute2
     )
 
-    # Install missing packages only
     for pkg in "${PKGS[@]}"; do
         if ! dpkg -s "$pkg" >/dev/null 2>&1; then
+            echo "[LOCAL DEV] Installing missing package: $pkg"
             $SUDO apt-get install -y --no-install-recommends "$pkg"
         fi
     done
 else
-    echo "[CI] Running inside GitHub Actions — skipping apt-get installs"
+    echo "[CI] Running inside GitHub Actions — skipping system installs"
 fi
 
 # ------------------------------------------------------------
@@ -57,28 +62,22 @@ if [ -z "${GITHUB_ACTIONS:-}" ]; then
     mkdir -p "$HOME/bin"
 
     if ! command -v repo >/dev/null 2>&1; then
-        echo "Installing repo tool..."
+        echo "[LOCAL DEV] Installing 'repo' tool..."
         curl -fsSL https://storage.googleapis.com/git-repo-downloads/repo -o "$REPO_BIN"
         chmod a+x "$REPO_BIN"
     fi
 
     export PATH="$HOME/bin:$PATH"
-    echo "[LOCAL DEV] 'repo' tool is available at $(command -v repo)"
+    echo "[LOCAL DEV] 'repo' tool available at $(command -v repo)"
 else
-    echo "[CI] Repo tool is installed by CI — skipping"
+    echo "[CI] Repo tool installation is handled by CI — skipping"
 fi
 
 # ------------------------------------------------------------
-# Prepare results output directory
-# ------------------------------------------------------------
-mkdir -p "$RESULTS_DIR"
-echo "[INFO] Results directory: $RESULTS_DIR"
-
-# ------------------------------------------------------------
-# Docker environment detection
+# Docker detection: adjust LTTNG_HOME
 # ------------------------------------------------------------
 if [ -f /.dockerenv ]; then
-    echo "[DOCKER] Setting LTTNG_HOME"
+    echo "[DOCKER] Setting LTTNG_HOME to $RESULTS_DIR/lttng"
     export LTTNG_HOME="$RESULTS_DIR/lttng"
 fi
 
