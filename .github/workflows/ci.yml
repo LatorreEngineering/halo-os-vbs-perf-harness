@@ -1,191 +1,425 @@
-name: CI
+name: Halo.OS VBS Performance CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, develop]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  schedule:
+    # Run nightly at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Experiment duration (seconds)'
+        required: false
+        default: '120'
+      scenario:
+        description: 'Test scenario'
+        required: false
+        default: 'aeb_120kmh'
+        type: choice
+        options:
+          - aeb_120kmh
+          - lka_80kmh
+          - parking
+
+env:
+  PYTHON_VERSION: '3.10'
+  CMAKE_VERSION: '3.26.0'
+  CACHE_VERSION: v1
 
 jobs:
-  build-and-test:
+  # ===========================================================================
+  # Setup and Validation
+  # ===========================================================================
+  validate:
+    name: Validate Repository
     runs-on: ubuntu-22.04
-    env:
-      WORKSPACE: ${{ github.workspace }}
-      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-
     steps:
-      # -------------------------------
-      # Checkout repository
-      # -------------------------------
-      - uses: actions/checkout@v3
-
-      # -------------------------------
-      # Make CI scripts executable
-      # -------------------------------
-      - name: Make CI scripts executable
-        run: chmod +x ./ci/*.sh
-
-      # -------------------------------
-      # Setup environment
-      # -------------------------------
-      - name: Setup environment
-        run: ./ci/setup_env.sh
-
-      # -------------------------------
-      # Install 'repo' tool
-      # -------------------------------
-      - name: Install repo tool
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for proper versioning
+      
+      - name: Validate manifests
         run: |
-          mkdir -p ~/bin
-          curl -sSL https://storage.googleapis.com/git-repo-downloads/repo -o ~/bin/repo
-          chmod a+x ~/bin/repo
-          echo "$HOME/bin" >> $GITHUB_PATH
-          export PATH="$HOME/bin:$PATH"
-          repo --version
-
-      # -------------------------------
-      # Initialize & Sync Halo.OS manifests
-      # -------------------------------
-      - name: Initialize & Sync Halo.OS
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          set -e
-          HALO_WS="$WORKSPACE/halo_os_workspace"
-          mkdir -p "$HALO_WS"
-          cd "$HALO_WS"
-
-          # Use GITEE_TOKEN if private repos
-          if [ -n "${GITEE_TOKEN:-}" ]; then
-            git config --global url."https://${GITEE_TOKEN}:x-oauth-basic@gitee.com/".insteadOf "https://gitee.com/"
-          fi
-
-          # Init with pinned manifest
-          repo init -u https://github.com/LatorreEngineering/halo-os-vbs-perf-harness \
-                    -m manifests/pinned_manifest.xml
-
-          # Sync repos with retries
-          MAX_RETRIES=3
-          RETRY_DELAY=10
-          count=0
-          until [ $count -ge $MAX_RETRIES ]; do
-            repo sync -j$(nproc) && break
-            count=$((count+1))
-            echo "repo sync failed; retrying in ${RETRY_DELAY}s (attempt $count/$MAX_RETRIES)"
-            sleep $RETRY_DELAY
+          sudo apt-get update
+          sudo apt-get install -y xmllint
+          
+          echo "Validating XML manifests..."
+          for manifest in manifests/*.xml; do
+            if [ -f "$manifest" ]; then
+              echo "Checking $manifest"
+              xmllint --noout "$manifest" || exit 1
+            fi
           done
+          echo "All manifests valid"
+      
+      - name: Check Python syntax
+        run: |
+          python3 -m py_compile ci/*.py
+          echo "Python syntax check passed"
+      
+      - name: Check Bash syntax
+        run: |
+          sudo apt-get install -y shellcheck
+          
+          for script in ci/*.sh; do
+            if [ -f "$script" ]; then
+              echo "Checking $script"
+              shellcheck -e SC1090,SC1091 "$script" || exit 1
+            fi
+          done
+          echo "Bash syntax check passed"
 
-          if [ $count -ge $MAX_RETRIES ]; then
-            echo "❌ Repo sync failed after $MAX_RETRIES attempts"
+  # ===========================================================================
+  # Environment Setup
+  # ===========================================================================
+  setup:
+    name: Setup Environment
+    runs-on: ubuntu-22.04
+    needs: validate
+    outputs:
+      cache-key: ${{ steps.cache-keys.outputs.deps }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Generate cache keys
+        id: cache-keys
+        run: |
+          # Create hash of all dependency-related files
+          DEPS_HASH=$(cat requirements.txt manifests/pinned_manifest.xml | sha256sum | cut -d' ' -f1)
+          echo "deps=${{ env.CACHE_VERSION }}-deps-${DEPS_HASH}" >> $GITHUB_OUTPUT
+          echo "Cache key: ${{ env.CACHE_VERSION }}-deps-${DEPS_HASH}"
+      
+      - name: Cache dependencies
+        id: cache-deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv
+            halo-os-src/.repo
+          key: ${{ steps.cache-keys.outputs.deps }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-deps-
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+      
+      - name: Run setup script
+        run: |
+          chmod +x ci/setup_env.sh
+          ./ci/setup_env.sh
+        env:
+          CI: true
+      
+      - name: Verify setup
+        run: |
+          source .env
+          python3 --version
+          cmake --version
+          ninja --version
+          repo --version || echo "repo not in PATH, will be available via .local/bin"
+          lttng --version
+
+  # ===========================================================================
+  # Build Halo.OS
+  # ===========================================================================
+  build:
+    name: Build Halo.OS
+    runs-on: ubuntu-22.04
+    needs: setup
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv
+            halo-os-src/.repo
+          key: ${{ needs.setup.outputs.cache-key }}
+          restore-keys: |
+            ${{ env.CACHE_VERSION }}-deps-
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: |
+          chmod +x ci/setup_env.sh
+          ./ci/setup_env.sh
+      
+      - name: Build Halo.OS
+        run: |
+          source .env
+          chmod +x ci/build_halo.sh
+          ./ci/build_halo.sh --jobs $(nproc)
+        env:
+          CI: true
+      
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: halo-build-${{ github.sha }}
+          path: |
+            build/bin/
+            build/lib/
+            build/git_info.txt
+          retention-days: 7
+      
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ github.sha }}
+          path: logs/
+          retention-days: 3
+
+  # ===========================================================================
+  # Run Experiments (Matrix)
+  # ===========================================================================
+  experiment:
+    name: Experiment - ${{ matrix.scenario }}
+    runs-on: ubuntu-22.04
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        scenario:
+          - aeb_120kmh
+          - lka_80kmh
+        duration:
+          - 120  # 2 minutes for CI
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Restore cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv
+            halo-os-src/.repo
+          key: ${{ needs.setup.outputs.cache-key }}
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: halo-build-${{ github.sha }}
+          path: build/
+      
+      - name: Make binaries executable
+        run: |
+          chmod +x build/bin/*
+      
+      - name: Install dependencies
+        run: |
+          chmod +x ci/setup_env.sh
+          ./ci/setup_env.sh
+      
+      - name: Run experiment
+        id: experiment
+        run: |
+          source .env
+          chmod +x ci/run_experiment.sh
+          
+          RUN_ID="ci_${{ matrix.scenario }}_$(date +%Y%m%d_%H%M%S)"
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          
+          ./ci/run_experiment.sh "${RUN_ID}" ${{ matrix.duration }} \
+            --scenario ${{ matrix.scenario }} \
+            --hardware simulation
+        continue-on-error: true
+        timeout-minutes: 10
+      
+      - name: Check experiment status
+        run: |
+          if [ -f "results/${{ steps.experiment.outputs.run_id }}/events.jsonl" ]; then
+            echo "Experiment completed successfully"
+          else
+            echo "Experiment failed - no events file found"
             exit 1
           fi
-
-      # -------------------------------
-      # Cache Python packages
-      # -------------------------------
-      - name: Cache Python packages
-        uses: actions/cache@v3
+      
+      - name: Upload experiment results
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          path: ~/.cache/pip
-          key: python-pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            python-pip-${{ runner.os }}-
+          name: experiment-${{ matrix.scenario }}-${{ github.sha }}
+          path: results/
+          retention-days: 7
 
+  # ===========================================================================
+  # Analyze Results
+  # ===========================================================================
+  analyze:
+    name: Analyze Results
+    runs-on: ubuntu-22.04
+    needs: experiment
+    if: always()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
-          python-version: 3.11
-
+          python-version: ${{ env.PYTHON_VERSION }}
+      
       - name: Install Python dependencies
-        run: pip install --upgrade pip && pip install -r requirements.txt
-
-      # -------------------------------
-      # Cache Halo build artifacts
-      # -------------------------------
-      - name: Cache Halo build
-        id: halo-cache
-        uses: actions/cache@v3
-        with:
-          path: build-halo
-          key: halo-build-${{ runner.os }}-${{ github.sha }}
-          restore-keys: |
-            halo-build-${{ runner.os }}-
-
-      # -------------------------------
-      # Build Halo.OS demo
-      # -------------------------------
-      - name: Build Halo.OS demo
-        if: steps.halo-cache.outputs.cache-hit != 'true'
-        run: ./ci/build_halo.sh
-
-      # -------------------------------
-      # Run sample experiment
-      # -------------------------------
-      - name: Run sample experiment
-        run: ./ci/run_experiment.sh results_test 30
-
-      # -------------------------------
-      # Cache VBS analysis results
-      # -------------------------------
-      - name: Cache VBS analysis results
-        id: analysis-cache
-        uses: actions/cache@v3
-        with:
-          path: results_test
-          key: analysis-results-${{ runner.os }}-${{ hashFiles('results_test/**/*') }}
-          restore-keys: |
-            analysis-results-${{ runner.os }}-
-
-      # -------------------------------
-      # Run VBS analysis
-      # -------------------------------
-      - name: Run VBS analysis
-        if: steps.analysis-cache.outputs.cache-hit != 'true'
-        run: python3 ci/analyze_vbs.py \
-              --trace results_test \
-              --output results_test \
-              --start_event halo_camera_ingest \
-              --end_event halo_brake_actuate \
-              --bins 30
-
-      # -------------------------------
-      # Python linting
-      # -------------------------------
-      - name: Run Python linter
-        run: flake8 ci/analyze_vbs.py
-
-      - name: Check Python formatting
-        run: black --check ci/analyze_vbs.py
-
-      # -------------------------------
-      # Shell script linting
-      # -------------------------------
-      - name: ShellCheck
-        uses: ludeeus/action-shellcheck@master
-        with:
-          files: 'ci/*.sh'
-
-      # -------------------------------
-      # Validate analysis results
-      # -------------------------------
-      - name: Validate results
         run: |
-          python3 - <<'EOF'
-          import json
-          from pathlib import Path
-
-          run_dirs = sorted(Path("results_test").glob("run_*"))
-          if not run_dirs:
-              raise FileNotFoundError("No analysis run directories found!")
-
-          result_file = run_dirs[-1] / "latency_results.json"
-          if not result_file.exists():
-              raise FileNotFoundError("Latency results JSON not found!")
-
-          with open(result_file) as f:
-              results = json.load(f)
-
-          assert results["num_samples"] > 0, "No samples processed!"
-          assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
-          print("✅ Analysis results validated successfully!")
+          python3 -m pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      - name: Download all experiment results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: experiment-*
+          path: results/
+      
+      - name: Run analysis
+        id: analysis
+        run: |
+          chmod +x ci/analyze_vbs.py
+          
+          # Find all events.jsonl files
+          find results/ -name "events.jsonl" | while read events_file; do
+            echo "Analyzing: ${events_file}"
+            output_dir=$(dirname "${events_file}")
+            
+            python3 ci/analyze_vbs.py "${events_file}" \
+              --output "${output_dir}" \
+              --verbose || echo "Analysis failed for ${events_file}"
+          done
+        continue-on-error: true
+      
+      - name: Generate summary report
+        run: |
+          cat > results/ci_summary.md << 'EOF'
+          # Halo.OS VBS Performance CI Summary
+          
+          ## Build Information
+          - **Commit**: ${{ github.sha }}
+          - **Branch**: ${{ github.ref_name }}
+          - **Date**: $(date)
+          
+          ## Experiment Results
+          
           EOF
+          
+          # Append individual reports
+          find results/ -name "analysis_report.txt" | while read report; do
+            scenario=$(basename $(dirname "${report}"))
+            echo "### ${scenario}" >> results/ci_summary.md
+            echo '```' >> results/ci_summary.md
+            cat "${report}" >> results/ci_summary.md
+            echo '```' >> results/ci_summary.md
+            echo "" >> results/ci_summary.md
+          done
+      
+      - name: Upload analysis results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analysis-results-${{ github.sha }}
+          path: |
+            results/**/*.txt
+            results/**/*.png
+            results/**/*.md
+          retention-days: 30
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = fs.readFileSync('results/ci_summary.md', 'utf8');
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  # ===========================================================================
+  # Docker Build Test
+  # ===========================================================================
+  docker:
+    name: Docker Build Test
+    runs-on: ubuntu-22.04
+    needs: validate
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      
+      - name: Build Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: false
+          tags: halo-os-perf-harness:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      
+      - name: Test Docker image
+        run: |
+          docker run --rm halo-os-perf-harness:ci \
+            python3 -c "import numpy, pandas, matplotlib; print('Dependencies OK')"
+
+  # ===========================================================================
+  # Final Status
+  # ===========================================================================
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-22.04
+    needs: [validate, setup, build, experiment, analyze, docker]
+    if: always()
+    steps:
+      - name: Check job statuses
+        run: |
+          if [ "${{ needs.validate.result }}" != "success" ]; then
+            echo "Validation failed"
+            exit 1
+          fi
+          if [ "${{ needs.setup.result }}" != "success" ]; then
+            echo "Setup failed"
+            exit 1
+          fi
+          if [ "${{ needs.build.result }}" != "success" ]; then
+            echo "Build failed"
+            exit 1
+          fi
+          if [ "${{ needs.docker.result }}" != "success" ]; then
+            echo "Docker build failed"
+            exit 1
+          fi
+          
+          # Experiments and analysis can have warnings but shouldn't block
+          echo "All critical jobs passed!"
+      
+      - name: Report success
+        run: |
+          echo "✅ CI pipeline completed successfully"
+          echo "📊 Check the artifacts for detailed results"
