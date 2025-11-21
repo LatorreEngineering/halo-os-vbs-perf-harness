@@ -1,0 +1,51 @@
+# Halo.OS Performance Harness - Python Dependencies
+# Pin specific versions for reproducibility
+
+# Data processing
+numpy==1.26.2
+pandas==2.1.4
+
+# Visualization
+matplotlib==3.8.2
+seaborn==0.13.0
+
+# Statistical analysis
+scipy==1.11.4
+
+# JSON parsing (built-in, but include jsonschema for validation)
+jsonschema==4.20.0
+
+# YAML configuration
+PyYAML==6.0.1
+
+# CLI utilities
+click==8.1.7
+colorama==0.4.6
+
+# Progress bars
+tqdm==4.66.1
+
+# Testing (for future development)
+pytest==7.4.3
+pytest-cov==4.1.0
+pytest-timeout==2.2.0
+
+# Code quality
+pylint==3.0.3
+black==23.12.1
+flake8==6.1.0
+mypy==1.7.1
+
+# Type hints for data science libraries
+pandas-stubs==2.1.4.231218
+types-PyYAML==6.0.12.12
+
+# Jupyter notebooks (optional, for interactive analysis)
+jupyter==1.0.0
+notebook==7.0.6
+ipykernel==6.27.1
+ipywidgets==8.1.1
+
+# Documentation (optional)
+sphinx==7.2.6
+sphinx-rtd-theme==2.0.0
