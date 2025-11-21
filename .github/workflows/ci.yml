@@ -186,6 +186,6 @@ jobs:
               results = json.load(f)
 
           assert results["num_samples"] > 0, "No samples processed!"
-          assert results["mean_ms"] > 0, "Mean latency is zero!"
+          assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
