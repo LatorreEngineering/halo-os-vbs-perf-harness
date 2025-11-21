@@ -5,9 +5,17 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-readonly LOG_FILE="${PROJECT_ROOT}/logs/build_$(date +%Y%m%d_%H%M%S).log"
+# ---------------------------------------------------------------------------
+# Initialization
+# ---------------------------------------------------------------------------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly SCRIPT_DIR
+
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly PROJECT_ROOT
+
+LOG_FILE="${PROJECT_ROOT}/logs/build_$(date +%Y%m%d_%H%M%S).log"
+readonly LOG_FILE
 
 # Load environment if available
 [[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
@@ -21,7 +29,10 @@ JOBS=$(nproc 2>/dev/null || echo 4)
 
 mkdir -p "$(dirname "${LOG_FILE}")"
 
-log() { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
+# ---------------------------------------------------------------------------
+# Logging functions
+# ---------------------------------------------------------------------------
+log()   { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
 error() { echo "[$(date +'%F %T')] ERROR: $*" | tee -a "${LOG_FILE}" >&2; }
 fatal() { error "$@"; exit 1; }
 
@@ -56,11 +67,14 @@ done
 log "Validating manifest: ${MANIFEST_FILE}"
 [[ -f "$MANIFEST_FILE" ]] || fatal "Manifest not found"
 
-command -v xmllint >/dev/null 2>&1 && xmllint --noout "$MANIFEST_FILE" || log "Warning: xmllint not available"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$MANIFEST_FILE"
+else
+    log "Warning: xmllint not available"
+fi
 
 grep -q '<remote' "$MANIFEST_FILE" || fatal "Manifest missing <remote>"
 grep -q '<project' "$MANIFEST_FILE" || fatal "Manifest missing <project>"
-
 log "Manifest validation passed"
 
 # ---------------------------------------------------------------------------
@@ -72,8 +86,7 @@ cd "$HALO_SRC_DIR"
 
 if [[ ! -d .repo ]]; then
     log "Initializing repo..."
-    repo init -u "https://gitee.com/LatorreEngineering/halo-os-vbs-perf-harness" -m "$MANIFEST_FILE" || \
-        fatal "Repo init failed"
+    repo init -u "https://gitee.com/LatorreEngineering/halo-os-vbs-perf-harness" -m "$MANIFEST_FILE" || fatal "Repo init failed"
 else
     log "Repo already initialized"
 fi
@@ -90,6 +103,7 @@ while [[ $retry -lt $max_retries ]]; do
         sleep 5
     fi
 done
+
 [[ $retry -lt $max_retries ]] || fatal "Repo sync failed after $max_retries attempts"
 log "Repo sync successful"
 
@@ -99,14 +113,17 @@ log "Repo sync successful"
 log "Recording git info..."
 mkdir -p "$BUILD_DIR"
 git_info_file="${BUILD_DIR}/git_info.txt"
-repo forall -c 'echo "Project: $REPO_PROJECT"; echo "Commit: $(git rev-parse HEAD)"; echo "Branch: $(git rev-parse --abbrev-ref HEAD)"; echo ""' > "$git_info_file"
+
+repo forall -c "echo \"Project: \$REPO_PROJECT\"; echo \"Commit: \$(git rev-parse HEAD)\"; echo \"Branch: \$(git rev-parse --abbrev-ref HEAD)\"; echo \"\"" > "$git_info_file"
 log "Git info saved to $git_info_file"
 
 # ---------------------------------------------------------------------------
 # Configure build
 # ---------------------------------------------------------------------------
 log "Configuring build..."
-[[ $CLEAN_BUILD -eq 1 ]] && rm -rf "$BUILD_DIR"
+if [[ $CLEAN_BUILD -eq 1 ]]; then
+    rm -rf "$BUILD_DIR"
+fi
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
@@ -151,7 +168,11 @@ for artifact in "${expected_artifacts[@]}"; do
         ((errors++))
     else
         log "Found: $artifact"
-        command -v nm >/dev/null 2>&1 && nm "$artifact" 2>/dev/null | grep -q lttng && log "  ✓ LTTng OK" || log "  ✗ LTTng missing"
+        if command -v nm >/dev/null 2>&1 && nm "$artifact" 2>/dev/null | grep -q lttng; then
+            log "  ✓ LTTng OK"
+        else
+            log "  ✗ LTTng missing"
+        fi
     fi
 done
 [[ $errors -eq 0 ]] || fatal "Build validation failed with $errors errors"
