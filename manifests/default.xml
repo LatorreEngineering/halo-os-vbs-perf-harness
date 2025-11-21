@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<manifest>
+
+  <!-- Default remote -->
+  <remote
+      name="github"
+      fetch="https://github.com/" />
+
+  <!-- Default revision -->
+  <default revision="main" remote="github" sync-j="4" />
+
+  <!-- ──────────────────────────────────────────────── -->
+  <!-- Primary project (this repo)                     -->
+  <!-- ──────────────────────────────────────────────── -->
+  <project
+      name="LatorreEngineering/halo-os-vbs-perf-harness"
+      path="halo-os-vbs-perf-harness"
+      revision="main" />
+
+  <!-- ──────────────────────────────────────────────── -->
+  <!-- Dependencies (YOU MUST UPDATE TO REAL REPOS)    -->
+  <!-- ──────────────────────────────────────────────── -->
+
+  <!-- Example dependencies — replace these with actual -->
+  <project name="LatorreEngineering/halo-os"               path="halo-os" />
+  <project name="LatorreEngineering/halo-vbs"              path="halo-vbs" />
+  <project name="LatorreEngineering/halo-middleware"       path="halo-middleware" />
+  <project name="LatorreEngineering/halo-hw-abstraction"   path="halo-hw-abstraction" />
+
+  <!-- If you depend on Qualcomm/NVIDIA repos via Gitee -->
+  <remote
+      name="gitee"
+      fetch="https://gitee.com/"
+  />
+
+  <!-- Example Gitee project -->
+  <!-- <project name="vendor/qualcomm/bsp" path="qcom-bsp" remote="gitee" /> -->
+
+</manifest>
