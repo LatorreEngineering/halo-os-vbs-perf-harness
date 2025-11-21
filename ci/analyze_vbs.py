@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """
-Improved analyze_vbs.py - Robust VBS latency analysis for Halo.OS
+analyze_vbs.py - Robust Halo.OS VBS latency analysis
 
 Features:
- - Automatically loads all runs in trace_dir/run_*/events.jsonl
- - Validates frame ordering & missing events
- - Computes latency, jitter, p99, p9999
- - Generates plots
- - Gracefully handles empty or malformed data
+ - Loads all run_*/events.jsonl from trace_dir
+ - Computes latency, jitter, P95, P99, P99.99
+ - Generates histogram
+ - Outputs results as JSON compatible with CI
 """
 
 import argparse
@@ -18,43 +17,37 @@ import json
 import logging
 import sys
 import matplotlib
-matplotlib.use("Agg")   # Safe for CI
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-
 
 logging.basicConfig(level=logging.INFO, format="[%(levelname)s] %(message)s")
 
 
 # ------------------------------------------------------------
-# Load JSONL files
+# Load all JSONL runs
 # ------------------------------------------------------------
 def load_jsonl_runs(trace_dir: Path) -> pd.DataFrame:
-    """
-    Loads all run_*/events.jsonl files into a single DataFrame.
-    """
     run_dirs = sorted(trace_dir.glob("run_*"))
     if not run_dirs:
         raise FileNotFoundError(f"No run_* directories found in {trace_dir}")
 
     events = []
     for run in run_dirs:
-        jsonl = run / "events.jsonl"
-        if not jsonl.exists():
-            logging.warning(f"Missing events.jsonl in {run}, skipping.")
+        jsonl_file = run / "events.jsonl"
+        if not jsonl_file.exists():
+            logging.warning(f"Missing {jsonl_file}, skipping")
             continue
-
-        with open(jsonl, "r") as f:
+        with open(jsonl_file) as f:
             for line in f:
                 try:
                     events.append(json.loads(line))
                 except json.JSONDecodeError:
-                    logging.warning(f"Malformed JSON in {jsonl}: {line.strip()}")
+                    logging.warning(f"Malformed JSON: {line.strip()}")
 
     if not events:
-        raise ValueError("No valid events found in experiment.")
+        raise ValueError("No valid events found")
 
     df = pd.DataFrame(events)
-
     required = {"frame_id", "time", "name"}
     if not required.issubset(df.columns):
         raise ValueError(f"Missing required columns: {required - set(df.columns)}")
@@ -63,63 +56,56 @@ def load_jsonl_runs(trace_dir: Path) -> pd.DataFrame:
 
 
 # ------------------------------------------------------------
-# Latency computation
+# Compute latency
 # ------------------------------------------------------------
 def compute_latency(df: pd.DataFrame, start_event: str, end_event: str) -> pd.Series:
-
     start_df = df[df["name"] == start_event].set_index("frame_id")["time"]
-    end_df   = df[df["name"] == end_event].set_index("frame_id")["time"]
+    end_df = df[df["name"] == end_event].set_index("frame_id")["time"]
 
-    common = start_df.index.intersection(end_df.index)
-    if len(common) == 0:
+    common_frames = start_df.index.intersection(end_df.index)
+    if len(common_frames) == 0:
         raise ValueError(f"No matching frame_ids between {start_event} and {end_event}")
 
-    latency_ms = (end_df.loc[common] - start_df.loc[common]) / 1e6
-
+    latency_ms = (end_df.loc[common_frames] - start_df.loc[common_frames]) / 1e6
     return latency_ms
 
 
 # ------------------------------------------------------------
-# Plots
+# Generate histogram
 # ------------------------------------------------------------
-def generate_plots(latencies: pd.Series, out: Path, bins: int = 40):
-    out.mkdir(parents=True, exist_ok=True)
-
+def generate_plots(latencies: pd.Series, out_dir: Path, bins: int = 30):
+    out_dir.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(8, 5))
-    plt.hist(latencies, bins=bins, edgecolor='black')
+    plt.hist(latencies, bins=bins, edgecolor='black', color='skyblue')
     plt.title("Latency Distribution")
     plt.xlabel("Latency (ms)")
     plt.ylabel("Frequency")
     plt.tight_layout()
-
-    img = out / "latency_histogram.png"
-    plt.savefig(img)
+    plot_file = out_dir / "latency_histogram.png"
+    plt.savefig(plot_file)
     plt.close()
-
-    logging.info(f"Saved histogram → {img}")
+    logging.info(f"Saved histogram → {plot_file}")
 
 
 # ------------------------------------------------------------
-# Save results
+# Save results JSON
 # ------------------------------------------------------------
-def save_results(lat: pd.Series, out: Path):
-    out.mkdir(parents=True, exist_ok=True)
-
+def save_results(latencies: pd.Series, out_dir: Path):
+    out_dir.mkdir(parents=True, exist_ok=True)
     results = {
-        "num_samples": int(len(lat)),
-        "mean_ms": float(lat.mean()),
-        "median_ms": float(lat.median()),
-        "p95_ms": float(lat.quantile(0.95)),
-        "p99_ms": float(lat.quantile(0.99)),
-        "p9999_ms": float(lat.quantile(0.9999)),
-        "std_jitter_ms": float(lat.std()),
+        "num_samples": int(len(latencies)),
+        "mean_latency_ms": float(latencies.mean()),
+        "p50_latency_ms": float(latencies.quantile(0.50)),
+        "p95_latency_ms": float(latencies.quantile(0.95)),
+        "p99_latency_ms": float(latencies.quantile(0.99)),
+        "p9999_latency_ms": float(latencies.quantile(0.9999)),
+        "std_jitter_ms": float(latencies.std())
     }
 
-    f = out / "latency_results.json"
-    with open(f, "w") as fp:
-        json.dump(results, fp, indent=4)
-
-    logging.info(f"Saved results → {f}")
+    json_file = out_dir / "latency_results.json"
+    with open(json_file, "w") as f:
+        json.dump(results, f, indent=4)
+    logging.info(f"Saved results → {json_file}")
 
 
 # ------------------------------------------------------------
@@ -131,23 +117,23 @@ def main():
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--start_event", default="halo_camera_ingest")
     parser.add_argument("--end_event", default="halo_brake_actuate")
-    parser.add_argument("--bins", type=int, default=40)
-    a = parser.parse_args()
+    parser.add_argument("--bins", type=int, default=30)
+    args = parser.parse_args()
 
     try:
-        df = load_jsonl_runs(a.trace)
-        lat = compute_latency(df, a.start_event, a.end_event)
-        generate_plots(lat, a.output, bins=a.bins)
-        save_results(lat, a.output)
+        df = load_jsonl_runs(args.trace)
+        latencies = compute_latency(df, args.start_event, args.end_event)
+        generate_plots(latencies, args.output, bins=args.bins)
+        save_results(latencies, args.output)
 
-        logging.info("")
-        logging.info("==== SUMMARY ====")
-        logging.info(f"Samples: {len(lat)}")
-        logging.info(f"Mean latency:  {lat.mean():.3f} ms")
-        logging.info(f"P95 latency:   {lat.quantile(0.95):.3f} ms")
-        logging.info(f"P99 latency:   {lat.quantile(0.99):.3f} ms")
-        logging.info(f"P99.99 latency:{lat.quantile(0.9999):.3f} ms")
-        logging.info(f"Std jitter:    {lat.std():.3f} ms")
+        logging.info("\n==== SUMMARY ====")
+        logging.info(f"Samples: {len(latencies)}")
+        logging.info(f"Mean latency:  {latencies.mean():.3f} ms")
+        logging.info(f"P50 latency:   {latencies.quantile(0.50):.3f} ms")
+        logging.info(f"P95 latency:   {latencies.quantile(0.95):.3f} ms")
+        logging.info(f"P99 latency:   {latencies.quantile(0.99):.3f} ms")
+        logging.info(f"P99.99 latency:{latencies.quantile(0.9999):.3f} ms")
+        logging.info(f"Std jitter:    {latencies.std():.3f} ms")
 
     except Exception as e:
         logging.error(f"Error: {e}")
