@@ -1,20 +1,29 @@
 #!/usr/bin/env bash
+# ci/analyze_vbs.sh
 # Wrapper for ci/analyze_vbs.py for CI usage
 # Usage: ./analyze_vbs.sh --trace TRACE_DIR --output OUTPUT_DIR [--npu-baseline BASELINE_MS] [--verbose]
 
 set -euo pipefail
 
-function usage() {
+# ---------------------------------------------------------------------------
+# Functions
+# ---------------------------------------------------------------------------
+usage() {
     echo "Usage: $0 --trace TRACE_DIR --output OUTPUT_DIR [--npu-baseline BASELINE_MS] [--verbose]"
     exit 1
 }
 
+log() { echo "[$(date +'%F %T')] $*"; }
+error() { echo "[$(date +'%F %T')] ERROR: $*" >&2; }
+
+# ---------------------------------------------------------------------------
+# Parse arguments
+# ---------------------------------------------------------------------------
 TRACE_DIR=""
 OUTPUT_DIR=""
 NPU_BASELINE=""
 VERBOSE=0
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --trace)
@@ -33,63 +42,63 @@ while [[ $# -gt 0 ]]; do
             VERBOSE=1
             shift
             ;;
+        --help|-h)
+            usage
+            ;;
         -*)
-            echo "Unknown option: $1"
+            error "Unknown option: $1"
             usage
             ;;
         *)
-            echo "Unexpected argument: $1"
+            error "Unexpected argument: $1"
             usage
             ;;
     esac
 done
 
+# ---------------------------------------------------------------------------
 # Validate required arguments
-if [[ -z "$TRACE_DIR" ]]; then
-    echo "Error: --trace is required"
-    usage
-fi
+# ---------------------------------------------------------------------------
+[[ -n "$TRACE_DIR" ]] || { error "--trace is required"; usage; }
+[[ -n "$OUTPUT_DIR" ]] || { error "--output is required"; usage; }
 
-if [[ -z "$OUTPUT_DIR" ]]; then
-    echo "Error: --output is required"
-    usage
-fi
-
-# Activate venv if exists
+# ---------------------------------------------------------------------------
+# Activate virtual environment if exists
+# ---------------------------------------------------------------------------
 if [[ -f "venv/bin/activate" ]]; then
     # shellcheck source=/dev/null
-    source venv/bin/activate
+    source "venv/bin/activate"
 fi
 
+# ---------------------------------------------------------------------------
 # Ensure output directory exists
+# ---------------------------------------------------------------------------
 mkdir -p "$OUTPUT_DIR"
 
-# Find all events.jsonl files
+# ---------------------------------------------------------------------------
+# Find events files
+# ---------------------------------------------------------------------------
 EVENT_FILES=()
 while IFS= read -r -d $'\0' file; do
     EVENT_FILES+=("$file")
 done < <(find "$TRACE_DIR" -maxdepth 1 -type f -name "events.jsonl" -print0)
 
-if [[ ${#EVENT_FILES[@]} -eq 0 ]]; then
-    echo "Error: No events.jsonl file found in $TRACE_DIR"
-    exit 1
-fi
+[[ ${#EVENT_FILES[@]} -gt 0 ]] || { error "No events.jsonl file found in $TRACE_DIR"; exit 1; }
 
+# ---------------------------------------------------------------------------
 # Run analysis on each events file
+# ---------------------------------------------------------------------------
 for EVENTS_FILE in "${EVENT_FILES[@]}"; do
-    echo "Running analysis on $EVENTS_FILE..."
+    log "Running analysis on $EVENTS_FILE..."
     PY_CMD=("python3" "ci/analyze_vbs.py" "$EVENTS_FILE" "--output" "$OUTPUT_DIR")
-    if [[ -n "$NPU_BASELINE" ]]; then
-        PY_CMD+=("--npu-baseline" "$NPU_BASELINE")
-    fi
-    if [[ $VERBOSE -eq 1 ]]; then
-        PY_CMD+=("--verbose")
-    fi
+
+    [[ -n "$NPU_BASELINE" ]] && PY_CMD+=("--npu-baseline" "$NPU_BASELINE")
+    [[ $VERBOSE -eq 1 ]] && PY_CMD+=("--verbose")
 
     if ! "${PY_CMD[@]}"; then
-        echo "Error: Analysis failed for $EVENTS_FILE"
+        error "Analysis failed for $EVENTS_FILE"
         exit 1
     fi
 done
 
-echo "✅ Analysis completed. Results saved in $OUTPUT_DIR"
+log "✅ Analysis completed. Results saved in $OUTPUT_DIR"
