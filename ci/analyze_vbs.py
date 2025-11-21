@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-analyze_vbs.py - Robust Halo.OS VBS latency analysis
+analyze_vbs.py - Halo.OS VBS latency analysis
 
 Features:
  - Loads all run_*/events.jsonl from trace_dir
- - Computes latency, jitter, P95, P99, P99.99
- - Generates histogram
- - Outputs results as JSON compatible with CI
+ - Validates frame ordering & event presence
+ - Computes latency, jitter, P50, P95, P99, P99.99
+ - Generates histogram (CI-friendly, non-interactive)
+ - Outputs results as JSON
 """
 
 import argparse
@@ -42,15 +43,16 @@ def load_jsonl_runs(trace_dir: Path) -> pd.DataFrame:
                 try:
                     events.append(json.loads(line))
                 except json.JSONDecodeError:
-                    logging.warning(f"Malformed JSON: {line.strip()}")
+                    logging.warning(f"Malformed JSON in {jsonl_file}: {line.strip()}")
 
     if not events:
-        raise ValueError("No valid events found")
+        raise ValueError("No valid events found in any run_* directories")
 
     df = pd.DataFrame(events)
-    required = {"frame_id", "time", "name"}
-    if not required.issubset(df.columns):
-        raise ValueError(f"Missing required columns: {required - set(df.columns)}")
+    required_columns = {"frame_id", "time", "name"}
+    if not required_columns.issubset(df.columns):
+        missing = required_columns - set(df.columns)
+        raise ValueError(f"Missing required columns: {missing}")
 
     return df.sort_values("frame_id")
 
@@ -59,21 +61,21 @@ def load_jsonl_runs(trace_dir: Path) -> pd.DataFrame:
 # Compute latency
 # ------------------------------------------------------------
 def compute_latency(df: pd.DataFrame, start_event: str, end_event: str) -> pd.Series:
-    start_df = df[df["name"] == start_event].set_index("frame_id")["time"]
-    end_df = df[df["name"] == end_event].set_index("frame_id")["time"]
+    start_times = df[df["name"] == start_event].set_index("frame_id")["time"]
+    end_times = df[df["name"] == end_event].set_index("frame_id")["time"]
 
-    common_frames = start_df.index.intersection(end_df.index)
+    common_frames = start_times.index.intersection(end_times.index)
     if len(common_frames) == 0:
-        raise ValueError(f"No matching frame_ids between {start_event} and {end_event}")
+        raise ValueError(f"No matching frame_ids between '{start_event}' and '{end_event}'")
 
-    latency_ms = (end_df.loc[common_frames] - start_df.loc[common_frames]) / 1e6
+    latency_ms = (end_times.loc[common_frames] - start_times.loc[common_frames]) / 1e6
     return latency_ms
 
 
 # ------------------------------------------------------------
 # Generate histogram
 # ------------------------------------------------------------
-def generate_plots(latencies: pd.Series, out_dir: Path, bins: int = 30):
+def generate_histogram(latencies: pd.Series, out_dir: Path, bins: int = 30):
     out_dir.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(8, 5))
     plt.hist(latencies, bins=bins, edgecolor='black', color='skyblue')
@@ -109,24 +111,24 @@ def save_results(latencies: pd.Series, out_dir: Path):
 
 
 # ------------------------------------------------------------
-# Main
+# Main function
 # ------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--trace", required=True, type=Path)
-    parser.add_argument("--output", required=True, type=Path)
-    parser.add_argument("--start_event", default="halo_camera_ingest")
-    parser.add_argument("--end_event", default="halo_brake_actuate")
-    parser.add_argument("--bins", type=int, default=30)
+    parser.add_argument("--trace", required=True, type=Path, help="Directory containing run_* events")
+    parser.add_argument("--output", required=True, type=Path, help="Directory to save analysis results")
+    parser.add_argument("--start_event", default="halo_camera_ingest", help="Start event name")
+    parser.add_argument("--end_event", default="halo_brake_actuate", help="End event name")
+    parser.add_argument("--bins", type=int, default=30, help="Number of histogram bins")
     args = parser.parse_args()
 
     try:
         df = load_jsonl_runs(args.trace)
         latencies = compute_latency(df, args.start_event, args.end_event)
-        generate_plots(latencies, args.output, bins=args.bins)
+        generate_histogram(latencies, args.output, bins=args.bins)
         save_results(latencies, args.output)
 
-        logging.info("\n==== SUMMARY ====")
+        logging.info("\n==== LATENCY SUMMARY ====")
         logging.info(f"Samples: {len(latencies)}")
         logging.info(f"Mean latency:  {latencies.mean():.3f} ms")
         logging.info(f"P50 latency:   {latencies.quantile(0.50):.3f} ms")
@@ -136,7 +138,7 @@ def main():
         logging.info(f"Std jitter:    {latencies.std():.3f} ms")
 
     except Exception as e:
-        logging.error(f"Error: {e}")
+        logging.error(f"Analysis failed: {e}")
         sys.exit(1)
 
 
