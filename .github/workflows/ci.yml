@@ -125,8 +125,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        scenario: ${{ fromJSON('["' + (github.event.inputs.scenario || 'aeb_120kmh') + '"]') }}
-        duration: ${{ fromJSON('[' + (github.event.inputs.duration || '120') + ']') }}
+        scenario: ${{ fromJSON(format('["{0}"]', github.event.inputs.scenario)) }}
+        duration: ${{ fromJSON(format('[{0}]', github.event.inputs.duration)) }}
     steps:
       - uses: actions/checkout@v4
       - name: Download build artifacts
@@ -207,3 +207,4 @@ jobs:
     steps:
       - name: Report CI completion
         run: echo "✅ CI pipeline completed successfully. Check artifacts for details."
+
