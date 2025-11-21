@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-#############################################
+echo "=== Starting VBS experiment ==="
+
+# ------------------------------------------------------------
 # Argument parsing & validation
-#############################################
+# ------------------------------------------------------------
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <output_dir> <num_samples> [--random-latency]"
     exit 1
@@ -23,18 +25,14 @@ if [ "${3:-}" == "--random-latency" ]; then
 fi
 
 mkdir -p "$OUTDIR"
+echo "[INFO] Output directory: $OUTDIR"
+echo "[INFO] Number of samples: $NUM_SAMPLES"
+echo "[INFO] Random latency enabled: $RANDOM_LATENCY"
 
-echo "=== Running VBS experiment ==="
-echo "Output directory: $OUTDIR"
-echo "Number of samples: $NUM_SAMPLES"
-echo "Random latency enabled: $RANDOM_LATENCY"
-echo
-
-#############################################
+# ------------------------------------------------------------
 # Metadata file
-#############################################
+# ------------------------------------------------------------
 METADATA_FILE="$OUTDIR/experiment_metadata.json"
-
 cat > "$METADATA_FILE" <<EOF
 {
   "timestamp": "$(date -Iseconds)",
@@ -44,21 +42,20 @@ cat > "$METADATA_FILE" <<EOF
   "generator_version": "v1.2"
 }
 EOF
-
 echo "[INFO] Metadata saved to $METADATA_FILE"
 
-#############################################
-# Trap for clean exit
-#############################################
+# ------------------------------------------------------------
+# Cleanup trap
+# ------------------------------------------------------------
 cleanup() {
     echo "⚠️ Experiment interrupted"
     exit 1
 }
 trap cleanup INT TERM
 
-#############################################
+# ------------------------------------------------------------
 # Main experiment loop
-#############################################
+# ------------------------------------------------------------
 for i in $(seq 1 "$NUM_SAMPLES"); do
     RUN_DIR="$OUTDIR/run_$i"
     mkdir -p "$RUN_DIR"
@@ -66,13 +63,12 @@ for i in $(seq 1 "$NUM_SAMPLES"); do
     # Start timestamp in nanoseconds
     START_TS=$(date +%s%N)
 
-    # Optional simulated latency
+    # Simulated latency
     if [ "$RANDOM_LATENCY" = true ]; then
         LAT_MS=$((RANDOM % 8))
-        # Sleep in seconds; supports sub-second fractional sleep
+        # Convert ms to seconds with 3 decimal places
         sleep "$(awk "BEGIN {printf \"%.3f\", $LAT_MS/1000}")"
     else
-        # Fixed 1ms latency for deterministic runs
         sleep 0.001 || true
     fi
 
@@ -85,9 +81,8 @@ for i in $(seq 1 "$NUM_SAMPLES"); do
         echo "{\"frame_id\": $i, \"name\": \"halo_brake_actuate\", \"time\": $END_TS}"
     } > "$EVENTS_FILE"
 
-    # Logging
     LAT_US=$(( (END_TS - START_TS) / 1000 ))
-    echo "[INFO] Sample $i generated, latency=${LAT_US}µs, saved to $EVENTS_FILE"
+    echo "[INFO] Sample $i: latency=${LAT_US}µs → $EVENTS_FILE"
 done
 
 echo
