@@ -5,18 +5,26 @@
 
 set -euo pipefail
 
-readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-readonly LOG_FILE="${PROJECT_ROOT}/setup.log"
-readonly PYTHON_MIN_VERSION="3.10"
+# ===================== SC2155 Fix =====================
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+readonly SCRIPT_DIR
+PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
+readonly PROJECT_ROOT
+LOG_FILE="${PROJECT_ROOT}/setup.log"
+readonly LOG_FILE
+PYTHON_MIN_VERSION="3.10"
+readonly PYTHON_MIN_VERSION
 
+# ==================================================================
+# Logging
+# ==================================================================
 log()   { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
 error() { echo "[$(date +'%F %T')] ERROR: $*" | tee -a "${LOG_FILE}" >&2; }
 fatal() { error "$@"; exit 1; }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Detect environment
-# -----------------------------------------------------------------------------
+# ==================================================================
 detect_environment() {
     log "Detecting environment..."
     [[ -f /etc/os-release ]] || fatal "/etc/os-release not found"
@@ -26,20 +34,22 @@ detect_environment() {
     log "Detected OS: $OS_ID $OS_VERSION"
     [[ $OS_ID != "ubuntu" || $OS_VERSION != "22.04" ]] && log "⚠ Recommended: Ubuntu 22.04 LTS"
 
-    export RUNNING_IN_CI=${CI:-0}
+    RUNNING_IN_CI=${CI:-0}
     [[ -n "${GITHUB_ACTIONS:-}" ]] && RUNNING_IN_CI=1
+    export RUNNING_IN_CI
 
-    export RUNNING_IN_DOCKER=0
+    RUNNING_IN_DOCKER=0
     if [[ -f /.dockerenv ]] || grep -q 'docker\|lxc' /proc/1/cgroup 2>/dev/null; then
         RUNNING_IN_DOCKER=1
     fi
+    export RUNNING_IN_DOCKER
 
     log "CI environment: $RUNNING_IN_CI, Docker: $RUNNING_IN_DOCKER"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Install system dependencies
-# -----------------------------------------------------------------------------
+# ==================================================================
 install_system_dependencies() {
     log "Installing system packages..."
     SUDO=""
@@ -57,15 +67,15 @@ install_system_dependencies() {
     ${SUDO} apt-get install -y "${packages[@]}" || fatal "Failed to install system packages"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Python environment
-# -----------------------------------------------------------------------------
+# ==================================================================
 setup_python_environment() {
     log "Setting up Python environment..."
     command -v python3 >/dev/null || fatal "Python3 not found"
 
-    python3 -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" || \
-        fatal "Python >= $PYTHON_MIN_VERSION required"
+    python3 -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" \
+        || fatal "Python >= $PYTHON_MIN_VERSION required"
 
     local venv_dir="${PROJECT_ROOT}/venv"
     if [[ ! -d "$venv_dir" ]]; then
@@ -85,9 +95,9 @@ setup_python_environment() {
     fi
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Repo tool setup
-# -----------------------------------------------------------------------------
+# ==================================================================
 setup_repo_tool() {
     log "Setting up repo tool..."
     if ! command -v repo >/dev/null; then
@@ -95,14 +105,15 @@ setup_repo_tool() {
         curl -sSfL https://storage.googleapis.com/git-repo-downloads/repo -o "${HOME}/.local/bin/repo"
         chmod +x "${HOME}/.local/bin/repo"
         export PATH="${HOME}/.local/bin:${PATH}"
-        grep -q "${HOME}/.local/bin" <<< "$PATH" || echo 'export PATH=$HOME/.local/bin:$PATH' >> ~/.bashrc
+        # Fix SC2016: Use double quotes and escape $ for runtime evaluation
+        grep -q "${HOME}/.local/bin" <<< "$PATH" || echo "export PATH=\$HOME/.local/bin:\$PATH" >> ~/.bashrc
     fi
     log "Repo tool version: $(repo --version | head -n1)"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # LTTng verification
-# -----------------------------------------------------------------------------
+# ==================================================================
 verify_lttng() {
     log "Verifying LTTng..."
     command -v lttng >/dev/null || fatal "lttng command missing"
@@ -115,9 +126,9 @@ verify_lttng() {
     log "LTTng OK"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Setup directories
-# -----------------------------------------------------------------------------
+# ==================================================================
 setup_directories() {
     log "Creating directories..."
     for dir in build results logs cache halo-os-src; do
@@ -125,9 +136,9 @@ setup_directories() {
     done
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Export environment variables
-# -----------------------------------------------------------------------------
+# ==================================================================
 export_environment() {
     log "Exporting environment variables..."
     cat > "${PROJECT_ROOT}/.env" << EOF
@@ -147,9 +158,9 @@ EOF
     log "Environment exported to ${PROJECT_ROOT}/.env"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Validate setup
-# -----------------------------------------------------------------------------
+# ==================================================================
 validate_setup() {
     log "Validating setup..."
     local errors=0
@@ -170,9 +181,9 @@ validate_setup() {
     log "Setup validation passed"
 }
 
-# -----------------------------------------------------------------------------
+# ==================================================================
 # Main
-# -----------------------------------------------------------------------------
+# ==================================================================
 main() {
     log "===================================="
     log "Halo.OS Performance Setup"
