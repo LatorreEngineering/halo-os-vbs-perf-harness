@@ -4,7 +4,6 @@ set -euo pipefail
 #############################################
 # Argument parsing & validation
 #############################################
-
 if [ $# -lt 2 ]; then
     echo "Usage: $0 <output_dir> <num_samples> [--random-latency]"
     exit 1
@@ -34,16 +33,19 @@ echo
 #############################################
 # Metadata file
 #############################################
+METADATA_FILE="$OUTDIR/experiment_metadata.json"
 
-cat > "$OUTDIR/experiment_metadata.json" <<EOF
+cat > "$METADATA_FILE" <<EOF
 {
   "timestamp": "$(date -Iseconds)",
   "num_samples": $NUM_SAMPLES,
   "random_latency": $RANDOM_LATENCY,
   "hostname": "$(hostname)",
-  "generator_version": "v1.1"
+  "generator_version": "v1.2"
 }
 EOF
+
+echo "[INFO] Metadata saved to $METADATA_FILE"
 
 #############################################
 # Trap for clean exit
@@ -57,34 +59,35 @@ trap cleanup INT TERM
 #############################################
 # Main experiment loop
 #############################################
-
 for i in $(seq 1 "$NUM_SAMPLES"); do
     RUN_DIR="$OUTDIR/run_$i"
     mkdir -p "$RUN_DIR"
 
-    # Start event timestamp
+    # Start timestamp in nanoseconds
     START_TS=$(date +%s%N)
 
     # Optional simulated latency
     if [ "$RANDOM_LATENCY" = true ]; then
-        # random 0–8ms latency
         LAT_MS=$((RANDOM % 8))
-        sleep "0.$LAT_MS"
+        # Sleep in seconds; supports sub-second fractional sleep
+        sleep "$(awk "BEGIN {printf \"%.3f\", $LAT_MS/1000}")"
     else
-        # fixed 1ms latency for deterministic CI runs
-        sleep 0.001
+        # Fixed 1ms latency for deterministic runs
+        sleep 0.001 || true
     fi
 
     END_TS=$(date +%s%N)
 
-    # JSONL output
+    # Generate JSONL events
+    EVENTS_FILE="$RUN_DIR/events.jsonl"
     {
         echo "{\"frame_id\": $i, \"name\": \"halo_camera_ingest\", \"time\": $START_TS}"
         echo "{\"frame_id\": $i, \"name\": \"halo_brake_actuate\", \"time\": $END_TS}"
-    } > "$RUN_DIR/events.jsonl"
+    } > "$EVENTS_FILE"
 
-    # logging
-    printf "Generated sample %d: latency=%dus\n" "$i" "$(( (END_TS - START_TS) / 1000 ))"
+    # Logging
+    LAT_US=$(( (END_TS - START_TS) / 1000 ))
+    echo "[INFO] Sample $i generated, latency=${LAT_US}µs, saved to $EVENTS_FILE"
 done
 
 echo
