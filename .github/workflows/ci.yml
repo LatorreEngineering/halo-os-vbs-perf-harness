@@ -42,36 +42,122 @@ jobs:
         with:
           fetch-depth: 0  # Full history for proper versioning
       
+      - name: Install validation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xmllint shellcheck
+          echo "Validation tools installed"
+      
       - name: Validate manifests
         run: |
-          sudo apt-get update
-          sudo apt-get install -y xmllint
+          echo "==> Validating XML manifests..."
+          manifest_found=false
           
-          echo "Validating XML manifests..."
           for manifest in manifests/*.xml; do
             if [ -f "$manifest" ]; then
-              echo "Checking $manifest"
-              xmllint --noout "$manifest" || exit 1
+              manifest_found=true
+              echo "Checking: $manifest"
+              if xmllint --noout "$manifest" 2>&1; then
+                echo "✓ Valid: $manifest"
+              else
+                echo "✗ Invalid: $manifest"
+                echo "Error details:"
+                xmllint --noout "$manifest" 2>&1 || true
+                exit 1
+              fi
             fi
           done
-          echo "All manifests valid"
+          
+          if [ "$manifest_found" = false ]; then
+            echo "✗ No manifest files found in manifests/ directory"
+            exit 1
+          fi
+          
+          echo "✓ All manifests valid"
       
       - name: Check Python syntax
         run: |
-          python3 -m py_compile ci/*.py
-          echo "Python syntax check passed"
+          echo "==> Checking Python syntax..."
+          python_found=false
+          
+          for script in ci/*.py; do
+            if [ -f "$script" ]; then
+              python_found=true
+              echo "Checking: $script"
+              if python3 -m py_compile "$script" 2>&1; then
+                echo "✓ Valid: $script"
+              else
+                echo "✗ Invalid: $script"
+                python3 -m py_compile "$script" 2>&1 || true
+                exit 1
+              fi
+            fi
+          done
+          
+          if [ "$python_found" = false ]; then
+            echo "⚠ No Python scripts found in ci/ directory"
+          else
+            echo "✓ All Python scripts valid"
+          fi
       
       - name: Check Bash syntax
         run: |
-          sudo apt-get install -y shellcheck
+          echo "==> Checking Bash syntax..."
+          bash_found=false
           
           for script in ci/*.sh; do
             if [ -f "$script" ]; then
-              echo "Checking $script"
-              shellcheck -e SC1090,SC1091 "$script" || exit 1
+              bash_found=true
+              echo "Checking: $script"
+              # SC1090: Can't follow non-constant source
+              # SC1091: Not following sourced file
+              if shellcheck -e SC1090,SC1091 "$script" 2>&1; then
+                echo "✓ Valid: $script"
+              else
+                echo "✗ Issues found: $script"
+                shellcheck -e SC1090,SC1091 "$script" 2>&1 || true
+                exit 1
+              fi
             fi
           done
-          echo "Bash syntax check passed"
+          
+          if [ "$bash_found" = false ]; then
+            echo "✗ No Bash scripts found in ci/ directory"
+            exit 1
+          fi
+          
+          echo "✓ All Bash scripts valid"
+      
+      - name: Check required files
+        run: |
+          echo "==> Checking required files..."
+          missing=0
+          
+          required_files=(
+            "ci/setup_env.sh"
+            "ci/build_halo.sh"
+            "ci/run_experiment.sh"
+            "ci/analyze_vbs.py"
+            "requirements.txt"
+            "Dockerfile"
+            "README.md"
+          )
+          
+          for file in "${required_files[@]}"; do
+            if [ -f "$file" ]; then
+              echo "✓ Found: $file"
+            else
+              echo "✗ Missing: $file"
+              ((missing++))
+            fi
+          done
+          
+          if [ $missing -gt 0 ]; then
+            echo "✗ Missing $missing required file(s)"
+            exit 1
+          fi
+          
+          echo "✓ All required files present"
 
   # ===========================================================================
   # Environment Setup
