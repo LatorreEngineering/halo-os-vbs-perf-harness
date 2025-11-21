@@ -26,11 +26,15 @@ on:
 env:
   PYTHON_VERSION: '3.11'
   CACHE_VERSION: 'v2'
-  REPO_MANIFEST: 'manifests/pinned_manifest.xml'
+  # By default we use the public haloos manifests repo and the VBS manifest.
+  MANIFEST_REPO_URL: 'https://gitee.com/haloos/manifests.git'
+  MANIFEST_NAME: 'vbs.xml'
+  # Local manifest path (kept for hashing purposes only)
+  LOCAL_MANIFEST_PATH: 'manifests/pinned_manifest.xml'
 
 jobs:
 
-  # 1️⃣ Validate repository
+  # 1️⃣ Validate repository (XML, Python, ShellCheck)
   validate:
     runs-on: ubuntu-22.04
     steps:
@@ -56,19 +60,30 @@ jobs:
             shellcheck -e SC1090,SC1091 "$s"
           done
 
-  # 2️⃣ Setup environment
+  # 2️⃣ Setup environment, install repo tool and sync sources
   setup:
     runs-on: ubuntu-22.04
     needs: validate
     outputs:
       deps-cache-key: ${{ steps.cache-key.outputs.key }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Generate cache key
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute deps cache key
         id: cache-key
         run: |
-          HASH=$(sha256sum requirements.txt $REPO_MANIFEST | awk '{print $1}' | sha256sum | cut -d' ' -f1)
+          set -euo pipefail
+          FILES=""
+          [[ -f requirements.txt ]] && FILES="$FILES requirements.txt"
+          [[ -f "${{ env.LOCAL_MANIFEST_PATH }}" ]] && FILES="$FILES ${{ env.LOCAL_MANIFEST_PATH }}"
+          if [[ -z "$FILES" ]]; then
+            HASH="no-files"
+          else
+            HASH=$(sha256sum $FILES | awk '{print $1}' | sha256sum | cut -d' ' -f1)
+          fi
           echo "key=${{ env.CACHE_VERSION }}-deps-${HASH}" >> $GITHUB_OUTPUT
+
       - name: Cache dependencies
         uses: actions/cache@v4
         with:
@@ -77,20 +92,61 @@ jobs:
             venv
             halo-os-src/.repo
           key: ${{ steps.cache-key.outputs.key }}
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
-      - name: Install tools & setup env
+
+      - name: Install minimal system tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y git curl ca-certificates openssh-client
+
+      - name: Install repo tool
+        run: |
+          mkdir -p "${HOME}/.local/bin"
+          curl -sSfL https://storage.googleapis.com/git-repo-downloads/repo -o "${HOME}/.local/bin/repo"
+          chmod +x "${HOME}/.local/bin/repo"
+          echo "${HOME}/.local/bin" >> $GITHUB_PATH
+          echo "Repo version: $(repo --version || true)"
+
+      - name: Run project-specific setup (setup_env.sh)
         run: |
           chmod +x ci/setup_env.sh
           ./ci/setup_env.sh
-      - name: Initialize Halo.OS repo
+
+      - name: Initialize and sync Halo.OS sources
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN || '' }}
+          GITEE_SSH_KEY: ${{ secrets.GITEE_SSH_KEY || '' }}
+          MANIFEST_REPO_URL: ${{ env.MANIFEST_REPO_URL }}
+          MANIFEST_NAME: ${{ env.MANIFEST_NAME }}
         run: |
+          set -euo pipefail
           mkdir -p halo-os-src
           cd halo-os-src
-          repo init -u https://gitee.com/haloos/manifests.git -m pinned_manifest.xml --repo-url https://gitee.com
+
+          # If an SSH key is provided in secrets, use SSH access (preferred for private repos).
+          if [[ -n "${GITEE_SSH_KEY:-}" ]]; then
+            echo "Using GITEE_SSH_KEY (SSH) for Gitee access"
+            mkdir -p ~/.ssh
+            printf '%s\n' "${GITEE_SSH_KEY}" > ~/.ssh/id_rsa
+            chmod 600 ~/.ssh/id_rsa
+            ssh-keyscan gitee.com >> ~/.ssh/known_hosts || true
+            export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes'
+            repo init -u git@gitee.com:haloos/manifests.git -m "${MANIFEST_NAME}"
+          elif [[ -n "${GITEE_TOKEN:-}" ]]; then
+            echo "Using GITEE_TOKEN (HTTPS) for Gitee access"
+            # Keep token only in environment; using it in URL is needed by repo
+            repo init -u "https://${GITEE_TOKEN}@gitee.com/haloos/manifests.git" -m "${MANIFEST_NAME}"
+          else
+            echo "Using public haloos/manifests (no auth)"
+            repo init -u "${MANIFEST_REPO_URL}" -m "${MANIFEST_NAME}"
+          fi
+
+          # Sync; try parallel then fallback
           repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
 
   # 3️⃣ Build Halo.OS
@@ -98,7 +154,8 @@ jobs:
     runs-on: ubuntu-22.04
     needs: setup
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -122,35 +179,37 @@ jobs:
   experiment:
     runs-on: ubuntu-22.04
     needs: build
-    strategy:
-      fail-fast: false
-      matrix:
-        scenario: [aeb_120kmh]
-        duration: [120]
     steps:
-      - uses: actions/checkout@v4
-      - name: Set experiment inputs
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Compute run inputs
         id: inputs
         run: |
+          set -euo pipefail
           SCENARIO="${{ github.event.inputs.scenario }}"
           DURATION="${{ github.event.inputs.duration }}"
           if [ -z "$SCENARIO" ]; then SCENARIO="aeb_120kmh"; fi
           if [ -z "$DURATION" ]; then DURATION="120"; fi
           echo "scenario=$SCENARIO" >> $GITHUB_OUTPUT
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
+
       - name: Download build artifacts
         uses: actions/download-artifact@v4
         with:
           name: halo-build-${{ github.sha }}
           path: build/
+
       - name: Run experiments
         run: |
+          set -euo pipefail
           mkdir -p results
           chmod +x ci/run_experiment.sh
           RUN_DIR="results/${{ steps.inputs.outputs.scenario }}_$(date +%Y%m%d_%H%M%S)"
           ./ci/run_experiment.sh "$RUN_DIR" ${{ steps.inputs.outputs.duration }} \
             --scenario ${{ steps.inputs.outputs.scenario }} \
             --hardware simulation
+
       - name: Upload experiment results
         uses: actions/upload-artifact@v4
         with:
@@ -163,7 +222,8 @@ jobs:
     runs-on: ubuntu-22.04
     needs: experiment
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Restore venv
         run: source venv/bin/activate || true
       - name: Install Python deps
@@ -193,7 +253,8 @@ jobs:
     runs-on: ubuntu-22.04
     needs: setup
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Build Docker image
@@ -216,4 +277,3 @@ jobs:
     steps:
       - name: Report CI completion
         run: echo "✅ CI pipeline completed successfully. Check artifacts for details."
-
