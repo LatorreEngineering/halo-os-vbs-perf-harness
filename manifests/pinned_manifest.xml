@@ -1,118 +1,67 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!--
-  Halo.OS Pinned Manifest
-  Baseline: November 2025
-  
-  This manifest pins exact commit SHAs for reproducible builds.
-  DO NOT modify unless you want to update the baseline.
--->
 <manifest>
-  <!-- Remote repositories -->
-  <remote name="github"
-          fetch="https://github.com"
-          review="https://github.com" />
-  
-  <remote name="gitlab"
-          fetch="https://gitlab.com"
-          review="https://gitlab.com" />
-  
-  <!-- Default settings -->
-  <default remote="github"
-           revision="refs/heads/main"
-           sync-j="4" />
-  
-  <!-- Core Halo.OS -->
-  <project name="halo-automotive/halo-core"
-           path="core"
-           remote="github"
-           revision="a1b2c3d4e5f6789012345678901234567890abcd">
-    <linkfile src="README.md" dest="README_core.md" />
-  </project>
-  
-  <!-- Hypervisor and virtualization layer -->
-  <project name="halo-automotive/halo-hypervisor"
-           path="hypervisor"
-           remote="github"
-           revision="b2c3d4e5f67890123456789012345678901abcde" />
-  
-  <!-- Device drivers -->
-  <project name="halo-automotive/halo-drivers"
-           path="drivers"
-           remote="github"
-           revision="c3d4e5f678901234567890123456789012abcdef">
-    <copyfile src="configs/jetson_orin.conf"
-              dest="configs/platform.conf" />
-  </project>
-  
-  <!-- Camera service -->
-  <project name="halo-automotive/camera-service"
-           path="services/camera"
-           remote="github"
-           revision="d4e5f6789012345678901234567890123abcdef0" />
-  
-  <!-- Planning and decision service -->
-  <project name="halo-automotive/planning-service"
-           path="services/planning"
-           remote="github"
-           revision="e5f67890123456789012345678901234abcdef01" />
-  
-  <!-- Vehicle control service -->
-  <project name="halo-automotive/control-service"
-           path="services/control"
-           remote="github"
-           revision="f678901234567890123456789012345abcdef012" />
-  
-  <!-- NPU virtualization layer -->
-  <project name="halo-automotive/npu-virt"
-           path="drivers/npu"
-           remote="github"
-           revision="6789012345678901234567890123456abcdef0123" />
-  
-  <!-- Common libraries -->
-  <project name="halo-automotive/common-libs"
-           path="libs/common"
-           remote="github"
-           revision="789012345678901234567890123456789abcdef01" />
-  
-  <!-- IPC library -->
-  <project name="halo-automotive/ipc-lib"
-           path="libs/ipc"
-           remote="github"
-           revision="89012345678901234567890123456789012abcdef" />
-  
-  <!-- Tracing infrastructure -->
-  <project name="halo-automotive/trace-infra"
-           path="tools/tracing"
-           remote="github"
-           revision="9012345678901234567890123456789012345abcd" />
-  
-  <!-- Build system -->
-  <project name="halo-automotive/build-system"
-           path="build"
-           remote="github"
-           revision="0123456789012345678901234567890123456abcde">
-    <linkfile src="CMakeLists.txt" dest="CMakeLists.txt" />
-  </project>
-  
+  <!-- Remote definitions -->
+  <remote name="gitee" fetch="https://gitee.com/" />
+  <remote name="github" fetch="https://github.com/" />
+
+  <!-- Default revision -->
+  <default revision="main" remote="gitee" sync-j="4" />
+
+  <!-- Main performance harness repo -->
+  <project
+    name="LatorreEngineering/halo-os-vbs-perf-harness"
+    path="halo-os-vbs-perf-harness"
+    revision="main"
+    remote="github" />
+
+  <!-- Halo.OS components required for tests -->
+  <project
+    name="haloos/vbs"
+    path="halo-vbs"
+    revision="main"
+    remote="gitee" />
+
+  <project
+    name="haloos/apps_rt_demo"
+    path="apps_rt_demo"
+    revision="main"
+    remote="gitee" />
+
+  <project
+    name="haloos/vcos"
+    path="halo-vcos"
+    revision="main"
+    remote="gitee" />
+
+  <project
+    name="haloos/vcos_components_rt_framework"
+    path="vcos-components-rt-framework"
+    revision="main"
+    remote="gitee" />
+
+  <!-- Optional supporting projects -->
+  <project
+    name="haloos/docs"
+    path="haloos-docs"
+    revision="main"
+    remote="gitee" />
+
   <!-- Third-party dependencies -->
-  <project name="lttng/lttng-ust"
-           path="third_party/lttng-ust"
-           remote="github"
-           revision="v2.13.6" />
-  
-  <project name="protocolbuffers/protobuf"
-           path="third_party/protobuf"
-           remote="github"
-           revision="v25.1" />
-  
-  <project name="gabime/spdlog"
-           path="third_party/spdlog"
-           remote="github"
-           revision="v1.12.0" />
-  
-  <!-- Test data and scenarios -->
-  <project name="halo-automotive/test-scenarios"
-           path="test/scenarios"
-           remote="github"
-           revision="123456789012345678901234567890123456789abc" />
+  <project
+    name="lttng/lttng-ust"
+    path="third_party/lttng-ust"
+    revision="v2.13.6"
+    remote="github" />
+
+  <project
+    name="protocolbuffers/protobuf"
+    path="third_party/protobuf"
+    revision="v25.1"
+    remote="github" />
+
+  <project
+    name="gabime/spdlog"
+    path="third_party/spdlog"
+    revision="v1.12.0"
+    remote="github" />
 </manifest>
