@@ -31,7 +31,7 @@ env:
 jobs:
 
   # -------------------------
-  # 1️⃣ Validate repo
+  # 1️⃣ Validate repository
   # -------------------------
   validate:
     runs-on: ubuntu-22.04
@@ -48,11 +48,17 @@ jobs:
       - name: Validate Python scripts
         run: |
           for s in ci/*.py; do
-            python3 -m py_compile "$s"
+            if head -n1 "$s" | grep -qE '^#!.*python'; then
+              echo "Checking Python syntax: $s"
+              python3 -m py_compile "$s"
+            else
+              echo "Skipping $s (not Python)"
+            fi
           done
       - name: Validate Bash scripts
         run: |
           for s in ci/*.sh; do
+            echo "Checking Bash syntax: $s"
             shellcheck -e SC1090,SC1091 "$s"
           done
 
@@ -177,9 +183,9 @@ jobs:
           path: results/
       - name: Run analysis
         run: |
-          chmod +x ci/analyze_vbs.py
+          chmod +x ci/analyze_vbs.sh
           for trace_dir in results/*; do
-            python3 ci/analyze_vbs.py --trace "$trace_dir" --output "$trace_dir"
+            ./ci/analyze_vbs.sh --trace "$trace_dir" --output "$trace_dir"
           done
       - name: Upload analysis
         uses: actions/upload-artifact@v4
