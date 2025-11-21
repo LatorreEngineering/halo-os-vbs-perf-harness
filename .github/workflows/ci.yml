@@ -30,15 +30,15 @@ env:
 
 jobs:
 
-  # ---------------------------------------------------------------------------
-  # Validate repository structure, syntax, manifests
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 1️⃣ Validate repo
+  # -------------------------
   validate:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
       - name: Install validation tools
-        run: sudo apt-get update && sudo apt-get install -y xmllint shellcheck python3-venv
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck python3-venv
       - name: Validate XML manifests
         run: |
           for m in manifests/*.xml; do
@@ -56,9 +56,9 @@ jobs:
             shellcheck -e SC1090,SC1091 "$s"
           done
 
-  # ---------------------------------------------------------------------------
-  # Setup environment and repo
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 2️⃣ Setup environment
+  # -------------------------
   setup:
     runs-on: ubuntu-22.04
     needs: validate
@@ -95,9 +95,9 @@ jobs:
           repo init -u https://gitee.com/LatorreEngineering/halo-os-vbs-perf-harness -m $REPO_MANIFEST
           repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
 
-  # ---------------------------------------------------------------------------
-  # Build Halo.OS demo
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 3️⃣ Build Halo.OS
+  # -------------------------
   build:
     runs-on: ubuntu-22.04
     needs: setup
@@ -122,9 +122,9 @@ jobs:
           path: build/
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
-  # Run experiments
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 4️⃣ Run experiments
+  # -------------------------
   experiment:
     runs-on: ubuntu-22.04
     needs: build
@@ -140,6 +140,8 @@ jobs:
         with:
           name: halo-build-${{ github.sha }}
           path: build/
+      - name: Create results directory
+        run: mkdir -p results
       - name: Run experiment
         run: |
           chmod +x ci/run_experiment.sh
@@ -147,21 +149,23 @@ jobs:
           ./ci/run_experiment.sh "$RUN_DIR" ${{ matrix.duration }} \
             --scenario ${{ matrix.scenario }} \
             --hardware simulation
-      - name: Upload results
+      - name: Upload experiment results
         uses: actions/upload-artifact@v4
         with:
           name: experiment-${{ matrix.scenario }}
           path: results/
           retention-days: 7
 
-  # ---------------------------------------------------------------------------
-  # Analyze experiment results
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 5️⃣ Analyze results
+  # -------------------------
   analyze:
     runs-on: ubuntu-22.04
     needs: experiment
     steps:
       - uses: actions/checkout@v4
+      - name: Restore venv
+        run: source venv/bin/activate || true
       - name: Install Python deps
         run: |
           pip install --upgrade pip
@@ -184,9 +188,9 @@ jobs:
           path: results/
           retention-days: 30
 
-  # ---------------------------------------------------------------------------
-  # Docker build test
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 6️⃣ Docker build test
+  # -------------------------
   docker:
     runs-on: ubuntu-22.04
     needs: setup
@@ -206,9 +210,9 @@ jobs:
         run: |
           docker run --rm halo-os-perf-harness:ci python3 -c "import numpy,pandas,matplotlib; print('Dependencies OK')"
 
-  # ---------------------------------------------------------------------------
-  # Final summary
-  # ---------------------------------------------------------------------------
+  # -------------------------
+  # 7️⃣ Final CI summary
+  # -------------------------
   ci-success:
     runs-on: ubuntu-22.04
     needs: [validate, setup, build, experiment, analyze, docker]
