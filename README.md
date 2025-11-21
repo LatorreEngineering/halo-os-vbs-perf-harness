@@ -20,32 +20,43 @@ This enables independent verification (or refutation) of published numbers (~100
 ```text
 ## Repo structure
 
-halo-os-perf-harness/
-├── .github/                      # CI workflows
-├── ci/                           # Scripts for setup, build, experiment, and analysis
-│   ├── setup_env.sh              # Shell: Installs host dependencies
-│   ├── build_halo.sh             # Shell: Builds Halo.OS instrumented demo
-│   ├── run_vbs_test.sh           # Shell: Simulation run
-│   ├── run_vbs_test_hw.sh        # Shell: Real hardware run
-│   ├── detect_hw.sh              # Shell: Detects target hardware
-│   ├── env_dump.sh               # Shell: Dumps system info
-│   └── analyze_vbs.py            # Python: Analyze tracepoints, latency, jitter, NPU/GPU
-├── tracepoints/
-│   └── halo_tracepoints.h        # LTTng-UST tracepoints
-├── manifests/
-│   └── pinned_manifest.xml       # Nov 2025 Halo.OS baseline
-├── examples/
-│   ├── sample_events.jsonl
-│   └── expected_output.txt
-├── docs/
-│   └── workflow.svg
-├── Dockerfile                     # For x86 CI runners
-├── docker-compose.yml
-├── requirements.txt
-├── LICENSE
-├── .gitignore
-└── README.md
-
+halo-os-vbs-perf-harness/
+├── .github/
+│   └── workflows/
+│       └── ci.yml                    # GitHub Actions CI/CD pipeline
+│
+├── ci/                               # Core automation scripts
+│   ├── setup_env.sh                  # Environment setup & dependency installation
+│   ├── build_halo.sh                 # Build Halo.OS with instrumentation
+│   ├── run_experiment.sh             # Execute experiments with LTTng tracing
+│   ├── analyze_vbs.py                # Analyze traces: latency, jitter, NPU overhead
+│   ├── detect_hw.sh                  # Hardware platform detection (optional)
+│   └── env_dump.sh                   # System information dump (optional)
+│
+├── manifests/                        # Repo tool manifests for reproducible builds
+│   ├── pinned_manifest.xml           # Pinned commit SHAs (Nov 2025 baseline)
+│   └── default.xml                   # Default manifest (optional)
+│
+├── tracepoints/                      # LTTng tracepoint definitions
+│   └── halo_tracepoints.h            # Tracepoint headers for instrumentation
+│
+├── examples/                         # Sample data and expected outputs
+│   ├── sample_events.jsonl           # Example trace event data
+│   └── expected_output.txt           # Expected analysis results
+│
+├── docs/                             # Documentation and diagrams
+│   ├── workflow.svg                  # CI/CD workflow visualization
+│   └── TROUBLESHOOTING.md            # CI debugging guide
+│
+├── Dockerfile                        # Container environment for CI/local dev
+├── docker-compose.yml                # Docker Compose orchestration
+├── docker-entrypoint.sh              # Container initialization script
+├── requirements.txt                  # Pinned Python dependencies
+├── Makefile                          # Convenience commands (optional)
+├── debug_ci.sh                       # Local CI validation script
+├── .gitignore                        # Git ignore rules
+├── LICENSE                           # Apache 2.0 license
+└── README.md                         # This file
 
 
 ```text
