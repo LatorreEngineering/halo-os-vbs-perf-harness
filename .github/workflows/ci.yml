@@ -55,26 +55,27 @@ jobs:
           mkdir -p "$HALO_WS"
           cd "$HALO_WS"
 
-          # Optional: rewrite URLs to include token for private repos
+          # Use GITEE_TOKEN if private repos
           if [ -n "${GITEE_TOKEN:-}" ]; then
             git config --global url."https://${GITEE_TOKEN}:x-oauth-basic@gitee.com/".insteadOf "https://gitee.com/"
           fi
 
-          # Initialize manifest
-          repo init -u https://gitee.com/haloos/manifests.git
+          # Init with pinned manifest
+          repo init -u https://github.com/LatorreEngineering/halo-os-vbs-perf-harness \
+                    -m manifests/pinned_manifest.xml
 
-          # Sync with retries
+          # Sync repos with retries
           MAX_RETRIES=3
-          SLEEP=10
-          n=0
-          until [ $n -ge $MAX_RETRIES ]; do
+          RETRY_DELAY=10
+          count=0
+          until [ $count -ge $MAX_RETRIES ]; do
             repo sync -j$(nproc) && break
-            n=$((n+1))
-            echo "repo sync failed; retrying in ${SLEEP}s (attempt $n/$MAX_RETRIES)"
-            sleep $SLEEP
+            count=$((count+1))
+            echo "repo sync failed; retrying in ${RETRY_DELAY}s (attempt $count/$MAX_RETRIES)"
+            sleep $RETRY_DELAY
           done
 
-          if [ $n -ge $MAX_RETRIES ]; then
+          if [ $count -ge $MAX_RETRIES ]; then
             echo "❌ Repo sync failed after $MAX_RETRIES attempts"
             exit 1
           fi
@@ -140,7 +141,12 @@ jobs:
       # -------------------------------
       - name: Run VBS analysis
         if: steps.analysis-cache.outputs.cache-hit != 'true'
-        run: python3 ci/analyze_vbs.py --trace results_test --output results_test --start_event halo_camera_ingest --end_event halo_brake_actuate --bins 30
+        run: python3 ci/analyze_vbs.py \
+              --trace results_test \
+              --output results_test \
+              --start_event halo_camera_ingest \
+              --end_event halo_brake_actuate \
+              --bins 30
 
       # -------------------------------
       # Python linting
@@ -180,6 +186,6 @@ jobs:
               results = json.load(f)
 
           assert results["num_samples"] > 0, "No samples processed!"
-          assert results["mean_latency_ms"] > 0, "Mean latency is zero!"
+          assert results["mean_ms"] > 0, "Mean latency is zero!"
           print("✅ Analysis results validated successfully!")
           EOF
