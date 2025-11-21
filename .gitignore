@@ -1,55 +1,81 @@
-# ==========================
-# Halo.OS Perf Harness Gitignore
-# ==========================
+# Halo.OS Performance Harness - Git Ignore
 
 # Build artifacts
 build/
 *.o
 *.so
 *.a
-*.out
-CMakeFiles/
-CMakeCache.txt
-Makefile
-cmake_install.cmake
+*.dylib
+*.exe
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+*.egg-info/
+dist/
+.eggs/
 
-# LTTng traces
-ust/
-*.log
-*.ctf
-
-# Tcpdump / network captures
-*.pcap
-
-# Repo manifest temp folders
-.repo/
-
-# Results from experiments
-results/
-*.tmp
-
-# Docker / container files
-*.pid
-*.env
-*.dockerignore
-
-# OS generated files
-.DS_Store
-Thumbs.db
-
-# Editor configs
-*.swp
-*.swo
+# IDEs
 .vscode/
 .idea/
-*.iml
-
-# Misc
-*.bak
 *.swp
+*.swo
+*~
+.DS_Store
+
+# Repo tool
+halo-os-src/.repo/
+.repo/
+
+# Results and logs
+results/
+logs/
+*.log
+
+# Cache
+cache/
+.ccache/
+*.cache
+
+# Environment
+.env
+.env.local
+
+# LTTng
+lttng/
+*.lttng
+
+# Coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# OS specific
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
