@@ -9,15 +9,14 @@ readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly LOG_FILE="${PROJECT_ROOT}/setup.log"
 readonly PYTHON_MIN_VERSION="3.10"
-readonly REPO_TOOL_VERSION="2.41"
 
-log() { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
+log()   { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
 error() { echo "[$(date +'%F %T')] ERROR: $*" | tee -a "${LOG_FILE}" >&2; }
 fatal() { error "$@"; exit 1; }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Detect environment
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 detect_environment() {
     log "Detecting environment..."
     [[ -f /etc/os-release ]] || fatal "/etc/os-release not found"
@@ -25,7 +24,6 @@ detect_environment() {
     OS_ID="$ID"
     OS_VERSION="$VERSION_ID"
     log "Detected OS: $OS_ID $OS_VERSION"
-
     [[ $OS_ID != "ubuntu" || $OS_VERSION != "22.04" ]] && log "⚠ Recommended: Ubuntu 22.04 LTS"
 
     export RUNNING_IN_CI=${CI:-0}
@@ -39,36 +37,42 @@ detect_environment() {
     log "CI environment: $RUNNING_IN_CI, Docker: $RUNNING_IN_DOCKER"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Install system dependencies
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 install_system_dependencies() {
     log "Installing system packages..."
     SUDO=""
     [[ $EUID -ne 0 && $(command -v sudo) ]] && SUDO="sudo"
 
     ${SUDO} apt-get update -qq || fatal "Failed to update apt"
-    
+
     local packages=(
         build-essential cmake ninja-build git curl wget python3 python3-pip python3-venv
         lttng-tools lttng-modules-dkms liblttng-ust-dev liblttng-ctl-dev liburcu-dev pkg-config
+        libxml2-utils shellcheck
     )
 
-    log "Installing: ${packages[*]}"
-    ${SUDO} apt-get install -y "${packages[@]}" || fatal "Failed installing system packages"
+    log "Installing packages: ${packages[*]}"
+    ${SUDO} apt-get install -y "${packages[@]}" || fatal "Failed to install system packages"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Python environment
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 setup_python_environment() {
     log "Setting up Python environment..."
     command -v python3 >/dev/null || fatal "Python3 not found"
+
     python3 -c "import sys; exit(0 if sys.version_info >= (3,10) else 1)" || \
-        fatal "Python >= 3.10 required"
+        fatal "Python >= $PYTHON_MIN_VERSION required"
 
     local venv_dir="${PROJECT_ROOT}/venv"
-    [[ ! -d "$venv_dir" ]] && python3 -m venv "$venv_dir" && log "Virtualenv created"
+    if [[ ! -d "$venv_dir" ]]; then
+        python3 -m venv "$venv_dir"
+        log "Virtualenv created at $venv_dir"
+    fi
+
     # shellcheck source=/dev/null
     source "$venv_dir/bin/activate"
 
@@ -81,9 +85,9 @@ setup_python_environment() {
     fi
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Repo tool setup
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 setup_repo_tool() {
     log "Setting up repo tool..."
     if ! command -v repo >/dev/null; then
@@ -96,9 +100,9 @@ setup_repo_tool() {
     log "Repo tool version: $(repo --version | head -n1)"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # LTTng verification
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 verify_lttng() {
     log "Verifying LTTng..."
     command -v lttng >/dev/null || fatal "lttng command missing"
@@ -107,23 +111,23 @@ verify_lttng() {
         log "⚠ User not in 'tracing' group. Required for full tracing functionality"
     fi
 
-    pkg-config --exists lttng-ust || fatal "lttng-ust dev libraries not found"
+    pkg-config --exists lttng-ust || fatal "lttng-ust development libraries not found"
     log "LTTng OK"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Setup directories
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 setup_directories() {
-    log "Setting up directories..."
+    log "Creating directories..."
     for dir in build results logs cache halo-os-src; do
         mkdir -p "${PROJECT_ROOT}/${dir}"
     done
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Export environment variables
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 export_environment() {
     log "Exporting environment variables..."
     cat > "${PROJECT_ROOT}/.env" << EOF
@@ -143,14 +147,14 @@ EOF
     log "Environment exported to ${PROJECT_ROOT}/.env"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Validate setup
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 validate_setup() {
     log "Validating setup..."
     local errors=0
 
-    for cmd in python3 pip cmake ninja git repo lttng; do
+    for cmd in python3 pip cmake ninja git repo lttng xmllint shellcheck; do
         command -v "$cmd" >/dev/null || { error "$cmd missing"; ((errors++)); }
     done
 
@@ -158,7 +162,7 @@ validate_setup() {
         python3 -c "import $pkg" 2>/dev/null || { error "Python package $pkg missing"; ((errors++)); }
     done
 
-    for dir in build results; do
+    for dir in build results logs cache halo-os-src; do
         [[ -d "${PROJECT_ROOT}/${dir}" ]] || { error "Directory ${dir} missing"; ((errors++)); }
     done
 
@@ -166,9 +170,9 @@ validate_setup() {
     log "Setup validation passed"
 }
 
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 # Main
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
 main() {
     log "===================================="
     log "Halo.OS Performance Setup"
