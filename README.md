@@ -124,22 +124,82 @@ References
 ⸻
 ## Quick Start
 
+### Prerequisites
+
+- Ubuntu 22.04 LTS (or Docker)
+- Python 3.10+
+- Git
+
+### Local Build
+
 ```bash
-# 1. Clone repo
-git clone https://github.com/open-auto-benchmarks/halo-os-perf-harness.git
-cd halo-os-perf-harness
+# 1. Clone repository
+git clone https://github.com/LatorreEngineering/halo-os-vbs-perf-harness.git
+cd halo-os-vbs-perf-harness
 
-# 2. Install environment dependencies
-./ci/setup_env.sh
+# 2. Make scripts executable
+chmod +x ci/*.sh
 
-# 3. Build the instrumented demo
+# 3. Build VBSPro (takes 10-15 minutes first time)
 ./ci/build_halo.sh
 
-# 4. Run a 5-minute 120 km/h AEB workload
-./ci/run_experiment.sh run001 300
+# 4. Check build artifacts
+ls -lh build/
 
-# 5. Analyze traces
-python3 ci/analyze.py results/run001/events.jsonl
+# 5. Run analysis on sample data
+python3 ci/analyze_vbs.py examples/sample_events.jsonl
+```
+
+### Using Docker
+
+```bash
+# Build container
+docker build -t halo-perf .
+
+# Run build inside container
+docker run --rm -v $(pwd):/workspace halo-perf ./ci/build_halo.sh
+
+# Run analysis
+docker run --rm -v $(pwd):/workspace halo-perf \
+    python3 ci/analyze_vbs.py examples/sample_events.jsonl
+```
+
+### CI/CD
+
+The repository includes GitHub Actions CI that automatically:
+
+1. **Validates** all scripts and manifests
+2. **Builds** VBSPro from Gitee sources
+3. **Tests** with mock trace data
+4. **Analyzes** performance metrics
+5. **Reports** results
+
+Push to `main` branch to trigger the CI pipeline.
+
+### Expected Output
+
+```
+Camera → Brake latency: 102.4 ± 8.7 ms
+  Median: 101.2 ms
+  p99.99: 142.1 ms
+Jitter: 2.7 ms
+NPU overhead: 19.8 %
+```
+
+### Troubleshooting
+
+**Build fails with "VBSPro not found":**
+- Check Gitee connectivity: `curl -I https://gitee.com`
+- Verify repo tool: `repo --version`
+
+**CI fails with YAML errors:**
+- Validate locally: `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`
+
+**Analysis produces no results:**
+- Check events.jsonl format: `head -5 results/*/events.jsonl`
+- Verify event names match expected format
+
+For more help, see [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) or open an issue.
 
 
 License
