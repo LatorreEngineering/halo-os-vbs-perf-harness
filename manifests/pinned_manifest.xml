@@ -1,67 +1,39 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Local reference manifest for Halo.OS VBS Performance Harness
+  
+  NOTE: This is for documentation/reference only.
+  The CI uses the official manifest from: https://gitee.com/haloos/manifests.git
+  
+  This file tracks the baseline used for reproducible builds.
+  Update the revision field when you want to pin to a specific commit.
+-->
 <manifest>
-  <!-- Remote definitions -->
-  <remote name="gitee" fetch="https://gitee.com/" />
-  <remote name="github" fetch="https://github.com/" />
-
-  <!-- Default revision -->
-  <default revision="main" remote="gitee" sync-j="4" />
-
-  <!-- Main performance harness repo -->
-  <project
-    name="LatorreEngineering/halo-os-vbs-perf-harness"
-    path="halo-os-vbs-perf-harness"
-    revision="main"
-    remote="github" />
-
-  <!-- Halo.OS components required for tests -->
-  <project
-    name="haloos/vbs"
-    path="halo-vbs"
-    revision="main"
-    remote="gitee" />
-
-  <project
-    name="haloos/apps_rt_demo"
-    path="apps_rt_demo"
-    revision="main"
-    remote="gitee" />
-
-  <project
-    name="haloos/vcos"
-    path="halo-vcos"
-    revision="main"
-    remote="gitee" />
-
-  <project
-    name="haloos/vcos_components_rt_framework"
-    path="vcos-components-rt-framework"
-    revision="main"
-    remote="gitee" />
-
-  <!-- Optional supporting projects -->
-  <project
-    name="haloos/docs"
-    path="haloos-docs"
-    revision="main"
-    remote="gitee" />
-
-  <!-- Third-party dependencies -->
-  <project
-    name="lttng/lttng-ust"
-    path="third_party/lttng-ust"
-    revision="v2.13.6"
-    remote="github" />
-
-  <project
-    name="protocolbuffers/protobuf"
-    path="third_party/protobuf"
-    revision="v25.1"
-    remote="github" />
-
-  <project
-    name="gabime/spdlog"
-    path="third_party/spdlog"
-    revision="v1.12.0"
-    remote="github" />
+  <remote name="gitee"
+          fetch="https://gitee.com"
+          review="https://gitee.com" />
+  
+  <default remote="gitee"
+           revision="refs/heads/master"
+           sync-j="4" />
+  
+  <!--
+    VBSPro: Vehicle Base System Pro
+    The core middleware for inter-domain messaging and resource virtualization
+    This is what we build and instrument for performance measurement
+  -->
+  <project name="haloos/vbs"
+           path="vbs"
+           remote="gitee"
+           revision="master">
+    <!-- VBSPro is the key component at vbs/vbspro/ -->
+  </project>
+  
+  <!--
+    Note: The actual sync is performed using vbs.xml from:
+    https://gitee.com/haloos/manifests.git
+    
+    This ensures we get the exact VBSPro dependencies without
+    unnecessary subsystems (VCOS, ADOS, etc.)
+  -->
 </manifest>
