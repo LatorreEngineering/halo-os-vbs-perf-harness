@@ -271,15 +271,13 @@ jobs:
           RUN_DIR="results/ci_${{ matrix.scenario }}_$(date +%Y%m%d_%H%M%S)"
           mkdir -p "$RUN_DIR"
           
-          # Generate mock events.jsonl
-          cat > "$RUN_DIR/events.jsonl" << 'ENDOFFILE'
-{"timestamp_ns": 1000000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 1}}
-{"timestamp_ns": 1102400000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 1}}
-{"timestamp_ns": 1200000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 2}}
-{"timestamp_ns": 1305000000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 2}}
-{"timestamp_ns": 2000000000, "event_name": "halo_npu_inference_start", "fields": {"inference_id": 1}}
-{"timestamp_ns": 2020000000, "event_name": "halo_npu_inference_end", "fields": {"inference_id": 1}}
-ENDOFFILE
+          # Generate mock events.jsonl using echo (avoiding heredoc in YAML)
+          echo '{"timestamp_ns": 1000000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 1}}' > "$RUN_DIR/events.jsonl"
+          echo '{"timestamp_ns": 1102400000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 1}}' >> "$RUN_DIR/events.jsonl"
+          echo '{"timestamp_ns": 1200000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 2}}' >> "$RUN_DIR/events.jsonl"
+          echo '{"timestamp_ns": 1305000000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 2}}' >> "$RUN_DIR/events.jsonl"
+          echo '{"timestamp_ns": 2000000000, "event_name": "halo_npu_inference_start", "fields": {"inference_id": 1}}' >> "$RUN_DIR/events.jsonl"
+          echo '{"timestamp_ns": 2020000000, "event_name": "halo_npu_inference_end", "fields": {"inference_id": 1}}' >> "$RUN_DIR/events.jsonl"
           
           echo "Mock experiment data created in: $RUN_DIR"
           echo "run_dir=$RUN_DIR" >> "$GITHUB_OUTPUT"
