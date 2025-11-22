@@ -15,8 +15,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly PROJECT_ROOT
 
 LOG_FILE="${PROJECT_ROOT}/logs/build_$(date +%Y%m%d_%H%M%S).log"
-readonly LOG_FILE
-
 mkdir -p "${PROJECT_ROOT}/logs"
 
 HALO_SRC_DIR="${HALO_SRC_DIR:-${PROJECT_ROOT}/halo-os-src}"
@@ -39,8 +37,7 @@ fatal() { error "$@"; exit 1; }
 log "Installing required system packages..."
 sudo apt-get update -qq
 sudo apt-get install -y --no-install-recommends \
-    git curl python3 libxml2-utils \
-    build-essential ninja-build cmake ca-certificates
+    git curl python3 libxml2-utils build-essential ninja-build cmake ca-certificates
 
 # ---------------------------------------------------------------------------
 # Ensure repo tool exists
@@ -72,12 +69,16 @@ done
 log "Validating manifest: ${MANIFEST_FILE}"
 [[ -f "$MANIFEST_FILE" ]] || fatal "Manifest not found"
 
-xmllint --noout "$MANIFEST_FILE" || fatal "Malformed XML manifest"
+if command -v xmllint >/dev/null 2>&1; then
+    xmllint --noout "$MANIFEST_FILE" || fatal "Malformed XML manifest"
+else
+    log "Warning: xmllint not available, skipping XML syntax check"
+fi
 
 grep -q '<remote' "$MANIFEST_FILE" || fatal "Manifest missing <remote>"
 grep -q '<project' "$MANIFEST_FILE" || fatal "Manifest missing <project>"
 
-log "Manifest is valid"
+log "Manifest validation passed"
 
 # ---------------------------------------------------------------------------
 # Repo init + sync
@@ -91,17 +92,16 @@ if [[ ! -d ".repo" ]]; then
     repo init \
         -u "https://gitee.com/haloos/manifests.git" \
         -m "pinned_manifest.xml" \
-        --no-repo-verify \
-        || fatal "repo init failed"
+        --no-repo-verify || fatal "repo init failed"
 else
     log "Repo already initialized"
 fi
 
-# Force HTTPS remotes
+# Normalize remotes to HTTPS (avoids SSH auth issues)
 log "Normalizing remote URLs to HTTPS..."
-repo forall -c 'git remote set-url origin "$(git config remote.origin.url | sed "s/^git@/https:\/\//; s/:/\//")"' || true
+repo forall -c "git remote set-url origin \$(git config remote.origin.url | sed 's/^git@/https:\\/\\//; s/:/\\//')" || true
 
-# Repo Sync
+# Repo sync with retries
 log "Starting repo sync..."
 max_retries=3
 retry=0
@@ -109,14 +109,12 @@ while [[ $retry -lt $max_retries ]]; do
     if repo sync --force-sync --no-clone-bundle -j"$JOBS"; then
         break
     else
-        error "repo sync failed – retrying..."
+        error "Repo sync failed – retrying..."
         ((retry++))
         sleep 5
     fi
 done
-
 [[ $retry -lt $max_retries ]] || fatal "Repo sync failed after $max_retries attempts"
-
 log "Repo sync successful"
 
 # ---------------------------------------------------------------------------
@@ -126,11 +124,8 @@ log "Recording git state..."
 mkdir -p "$BUILD_DIR"
 git_info_file="$BUILD_DIR/git_info.txt"
 
-repo forall -c \
-  'echo "Project: $REPO_PROJECT"; echo "Commit: $(git rev-parse HEAD)"; echo ""' \
-  > "$git_info_file"
-
-log "Git info saved"
+repo forall -c "echo \"Project: \$REPO_PROJECT\"; echo \"Commit: \$(git rev-parse HEAD)\"; echo \"\"" > "$git_info_file"
+log "Git info saved to $git_info_file"
 
 # ---------------------------------------------------------------------------
 # Configure Build
@@ -139,7 +134,6 @@ if [[ "$CLEAN_BUILD" -eq 1 ]]; then
     log "Performing clean build..."
     rm -rf "$BUILD_DIR"
 fi
-
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
@@ -151,37 +145,36 @@ cmake -G Ninja \
     -DENABLE_TRACING=ON \
     -DENABLE_PERF_INSTRUMENTATION=ON \
     -DCMAKE_INSTALL_PREFIX="${BUILD_DIR}/install" \
-    "$HALO_SRC_DIR" \
-    || fatal "CMake configuration failed"
+    "$HALO_SRC_DIR" || fatal "CMake configuration failed"
 
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
 log "Starting build with $JOBS jobs..."
 start_time=$(date +%s)
-
 cmake --build . --parallel "$JOBS" || fatal "Build failed"
-
 end_time=$(date +%s)
 log "Build finished in $((end_time - start_time)) seconds"
 
 # ---------------------------------------------------------------------------
-# Artifact Validation (best effort — optional)
+# Artifact Validation (strict)
 # ---------------------------------------------------------------------------
 log "Validating output artifacts..."
-
 declare -a expected_bins=(
     "bin/halo_main"
     "lib/libhalo_core.so"
 )
 
+errors=0
 for f in "${expected_bins[@]}"; do
     if [[ -f "$f" ]]; then
         log "  + Found: $f"
     else
-        log "  - Missing: $f"
+        error "  - Missing: $f"
+        ((errors++))
     fi
 done
+[[ $errors -eq 0 ]] || fatal "Build validation failed with $errors missing artifacts"
 
 # ---------------------------------------------------------------------------
 # Done
