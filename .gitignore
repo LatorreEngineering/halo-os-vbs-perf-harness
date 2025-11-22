@@ -1,81 +1,33 @@
-# Halo.OS Performance Harness - Git Ignore
-
 # Build artifacts
 build/
+halo-os-src/
 *.o
 *.so
 *.a
-*.dylib
-*.exe
 
 # Python
 __pycache__/
 *.py[cod]
-*$py.class
-*.so
-.Python
 venv/
-env/
-ENV/
-.venv
-pip-log.txt
-pip-delete-this-directory.txt
 *.egg-info/
-dist/
-.eggs/
 
-# IDEs
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Repo tool
-halo-os-src/.repo/
-.repo/
-
-# Results and logs
-results/
+# Logs and results
 logs/
+results/
 *.log
 
 # Cache
 cache/
 .ccache/
-*.cache
 
 # Environment
 .env
-.env.local
 
-# LTTng
-lttng/
-*.lttng
+# IDEs
+.vscode/
+.idea/
+*.swp
 
-# Coverage
-.coverage
-htmlcov/
-.pytest_cache/
-
-# Jupyter
-.ipynb_checkpoints/
-*.ipynb
-
-# Documentation builds
-docs/_build/
-docs/_static/
-docs/_templates/
-
-# OS specific
+# OS
+.DS_Store
 Thumbs.db
-.Spotlight-V100
-.Trashes
-
-# Temporary files
-tmp/
-temp/
-*.tmp
-*.bak
-*.backup
