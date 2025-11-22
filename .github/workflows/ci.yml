@@ -89,7 +89,10 @@ jobs:
           for script in ci/*.sh 2>/dev/null; do
             if [ -f "$script" ]; then
               echo "Checking: $script"
-              shellcheck -e SC1090,SC1091 "$script" || exit 1
+              # SC1090: Can't follow non-constant source
+              # SC1091: Not following sourced file
+              # SC2016: Expressions don't expand in single quotes (expected for repo forall)
+              shellcheck -e SC1090,SC1091,SC2016 "$script" || exit 1
               echo "✓ Valid: $script"
             fi
           done
@@ -269,17 +272,17 @@ jobs:
           mkdir -p "$RUN_DIR"
           
           # Generate mock events.jsonl
-          cat > "$RUN_DIR/events.jsonl" << 'EOF'
+          cat > "$RUN_DIR/events.jsonl" << 'ENDOFFILE'
 {"timestamp_ns": 1000000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 1}}
 {"timestamp_ns": 1102400000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 1}}
 {"timestamp_ns": 1200000000, "event_name": "halo_camera_frame_received", "fields": {"frame_id": 2}}
 {"timestamp_ns": 1305000000, "event_name": "halo_brake_actuated", "fields": {"frame_id": 2}}
 {"timestamp_ns": 2000000000, "event_name": "halo_npu_inference_start", "fields": {"inference_id": 1}}
 {"timestamp_ns": 2020000000, "event_name": "halo_npu_inference_end", "fields": {"inference_id": 1}}
-EOF
+ENDOFFILE
           
           echo "Mock experiment data created in: $RUN_DIR"
-          echo "run_dir=$RUN_DIR" >> $GITHUB_OUTPUT
+          echo "run_dir=$RUN_DIR" >> "$GITHUB_OUTPUT"
         id: mock_data
       
       - name: Upload experiment results
@@ -350,18 +353,19 @@ EOF
       
       - name: Generate summary report
         run: |
-          cat > results/ci_summary.md << 'EOF'
+          cat > results/ci_summary.md << 'ENDOFFILE'
 # Halo.OS VBS Performance CI Summary
 
 ## Build Information
 - **Commit**: ${{ github.sha }}
 - **Branch**: ${{ github.ref_name }}
-- **Date**: $(date)
-- **Workflow**: ${{ github.workflow }}
-
-## Experiment Results
-
-EOF
+ENDOFFILE
+          
+          echo "- **Date**: $(date)" >> results/ci_summary.md
+          echo "- **Workflow**: ${{ github.workflow }}" >> results/ci_summary.md
+          echo "" >> results/ci_summary.md
+          echo "## Experiment Results" >> results/ci_summary.md
+          echo "" >> results/ci_summary.md
           
           # Append analysis reports if they exist
           for report in results/**/analysis_report.txt; do
