@@ -24,9 +24,9 @@ fi
 log "Syncing (jobs=$(nproc))"
 repo sync -j"$(nproc)" --force-sync || die "Sync failed"
 
-# Provenance
+# Provenance (FIXED: Double quotes for expansion)
 mkdir -p "$BUILD_DIR"
-repo forall -c 'echo "Project: $REPO_PROJECT | Commit: $(git rev-parse HEAD)"' > "${BUILD_DIR}/git_info.txt"
+repo forall -c "echo \"Project: \$REPO_PROJECT | Commit: \$(git rev-parse HEAD)\"" > "${BUILD_DIR}/git_info.txt"
 
 cd "$HALO_SRC"
 
