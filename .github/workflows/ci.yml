@@ -23,32 +23,24 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  CACHE_VERSION: 'v3'  # bump when you change deps
+  CACHE_VERSION: 'v4'
   MANIFEST_REPO_URL: 'https://gitee.com/haloos/manifests.git'
   MANIFEST_NAME: 'vbs.xml'
 
 jobs:
-  # ────────────────────────────── VALIDATION (fast, non-blocking) ──────────────────────────────
   validate:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-
       - name: Install validation tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck
-
       - name: Validate XML manifests
         run: for f in manifests/*.xml; do xmllint --noout "$f"; done || exit 1
-
       - name: ShellCheck all scripts
         run: for f in ci/*.sh; do shellcheck "$f"; done
 
-      # PyLint is DISABLED in validate — it was killing the entire pipeline
-      # It runs separately below only on main (non-blocking)
-
-  # ────────────────────────────── OPTIONAL LINT (non-blocking) ──────────────────────────────
   lint-python:
-    if: github.ref == 'refs/heads/main'  # Only on main
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-22.04
     needs: validate
     steps:
@@ -56,17 +48,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install pylint
-        run: pip install pylint
       - name: Run PyLint (non-blocking)
         continue-on-error: true
         run: |
-          echo "Running PyLint (warnings only, does not fail CI)"
-          for f in ci/*.py; do
-            [ -f "$f" ] && pylint "$f" || echo "No Python files found"
-          done
+          pip install pylint
+          echo "Running PyLint (non-blocking)"
+          for f in ci/*.py; do [ -f "$f" ] && pylint "$f"; done
 
-  # ────────────────────────────── SETUP (venv + cache) ──────────────────────────────
   setup:
     runs-on: ubuntu-22.04
     needs: validate
@@ -74,37 +62,31 @@ jobs:
       cache-key: ${{ steps.cache.outputs.key }}
     steps:
       - uses: actions/checkout@v4
-
       - name: Generate cache key
         id: cache
         run: |
           hash=$(find manifests requirements.txt -type f -exec sha256sum {} + 2>/dev/null | sha256sum | cut -d' ' -f1)
           echo "key=${{ env.CACHE_VERSION }}-${hash}" >> $GITHUB_OUTPUT
-
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             venv/
           key: ${{ steps.cache.outputs.key }}
-
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-
       - name: Install Python dependencies
         run: |
           python -m venv venv
           . venv/bin/activate
           pip install --upgrade pip
-          [ -f requirements.txt ] && pip install -r requirements.txt || echo "No requirements.txt"
-
+          [ -f requirements.txt ] && pip install -r requirements.txt
       - name: Run setup_env.sh
         run: |
           chmod +x ci/setup_env.sh
           ./ci/setup_env.sh
 
-  # ────────────────────────────── BUILD VBSPro ──────────────────────────────
   build:
     runs-on: ubuntu-22.04
     needs: setup
@@ -116,14 +98,12 @@ jobs:
             ~/.cache/pip
             venv/
           key: ${{ needs.setup.outputs.cache-key }}
-
       - name: Build VBSPro
         env:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           chmod +x ci/build_halo.sh
           ./ci/build_halo.sh
-
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -131,7 +111,6 @@ jobs:
           path: build/
           retention-days: 7
 
-  # ────────────────────────────── RUN EXPERIMENT ──────────────────────────────
   experiment:
     runs-on: ubuntu-22.04
     needs: build
@@ -141,7 +120,6 @@ jobs:
         with:
           name: vbspro-build
           path: build/
-
       - name: Run performance experiment
         env:
           LD_LIBRARY_PATH: build/install/lib:$LD_LIBRARY_PATH
@@ -153,7 +131,6 @@ jobs:
           mkdir -p "results/$SCENARIO"
           chmod +x ci/run_experiment.sh
           ./ci/run_experiment.sh "results/$SCENARIO" "$DURATION" --scenario "$SCENARIO"
-
       - name: Upload traces
         uses: actions/upload-artifact@v4
         with:
@@ -161,7 +138,6 @@ jobs:
           path: results/
           retention-days: 7
 
-  # ────────────────────────────── ANALYZE TRACES ──────────────────────────────
   analyze:
     runs-on: ubuntu-22.04
     needs: experiment
@@ -171,8 +147,7 @@ jobs:
         with:
           name: experiment-traces
           path: results/
-
-      - name: Analyze traces with analyze.py
+      - name: Analyze traces
         run: |
           . venv/bin/activate
           for dir in results/*/; do
@@ -182,7 +157,6 @@ jobs:
               python ci/analyze.py "$jsonl" --output "$dir/metrics.json"
             fi
           done
-
       - name: Upload metrics
         uses: actions/upload-artifact@v4
         with:
@@ -190,7 +164,6 @@ jobs:
           path: results/
           retention-days: 30
 
-  # ────────────────────────────── DOCKER IMAGE ──────────────────────────────
   docker:
     runs-on: ubuntu-22.04
     needs: setup
@@ -203,9 +176,8 @@ jobs:
           load: true
           tags: halo-perf:ci
       - name: Test Docker image
-        run: docker run --rm halo-perf:ci python -c "import numpy, pandas; print('Docker image ready')"
+        run: docker run --rm halo-perf:ci python -c "import numpy, pandas; print('Docker ready')"
 
-  # ────────────────────────────── FINAL SUMMARY ──────────────────────────────
   summary:
     runs-on: ubuntu-22.04
     needs: [build, experiment, analyze, docker]
@@ -213,9 +185,9 @@ jobs:
     steps:
       - name: Final CI Status
         run: |
-          if [ '${{ needs.build.result }}' = 'success' ] && \
-             [ '${{ needs.experiment.result }}' = 'success' ] && \
-             [ '${{ needs.analyze.result }}' = 'success' ]; then
+          if [[ '${{ needs.build.result }}' == 'success' ]] && \
+             [[ '${{ needs.experiment.result }}' == 'success' ]] && \
+             [[ '${{ needs.analyze.result }}' == 'success' ]]; then
             echo "FULL PIPELINE SUCCESS: VBSPro built and metrics generated!"
           else
             echo "Some jobs failed — check artifacts and logs above."
