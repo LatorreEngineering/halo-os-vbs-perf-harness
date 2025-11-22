@@ -216,14 +216,14 @@ sync_repository() {
     # Normalize SSH URLs to HTTPS if no SSH key (prevents auth errors)
     if [[ -z "${GITEE_SSH_KEY:-}" ]]; then
         log "Normalizing remote URLs to HTTPS..."
-        repo forall -c '
-            origin_url=$(git remote get-url origin 2>/dev/null || true)
-            if [[ "$origin_url" == git@* ]]; then
-                https_url=$(echo "$origin_url" | sed "s|git@gitee.com:|https://gitee.com/|")
-                git remote set-url origin "$https_url"
-                echo "Normalized: $origin_url -> $https_url"
+        repo forall -c "
+            origin_url=\$(git remote get-url origin 2>/dev/null || true)
+            if [[ \"\$origin_url\" == git@* ]]; then
+                https_url=\$(echo \"\$origin_url\" | sed 's|git@gitee.com:|https://gitee.com/|')
+                git remote set-url origin \"\$https_url\"
+                echo \"Normalized: \$origin_url -> \$https_url\"
             fi
-        ' || true
+        " || true
     fi
     
     # Sync with retries
@@ -274,13 +274,13 @@ record_provenance() {
         echo "Repository States:"
         echo "===================="
         
-        repo forall -c '
-            echo "Project: $REPO_PROJECT"
-            echo "  Path: $REPO_PATH"
-            echo "  Commit: $(git rev-parse HEAD 2>/dev/null || echo 'unknown')"
-            echo "  Branch: $(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo 'unknown')"
-            echo ""
-        ' 2>/dev/null || echo "Could not record all project states"
+        repo forall -c "
+            echo 'Project: \$REPO_PROJECT'
+            echo '  Path: \$REPO_PATH'
+            echo \"  Commit: \$(git rev-parse HEAD 2>/dev/null || echo unknown)\"
+            echo \"  Branch: \$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)\"
+            echo ''
+        " 2>/dev/null || echo "Could not record all project states"
     } > "$git_info"
     
     log "Provenance saved to: $git_info"
@@ -332,7 +332,7 @@ inject_tracepoints() {
         
         # Create minimal tracepoint header
         mkdir -p "$(dirname "$trace_header")"
-        cat > "$trace_header" << 'EOF'
+        cat > "$trace_header" << 'TRACEPOINT_EOF'
 #ifndef HALO_TRACEPOINTS_H
 #define HALO_TRACEPOINTS_H
 
@@ -378,7 +378,7 @@ TRACEPOINT_EVENT(
 #endif
 
 #endif // HALO_TRACEPOINTS_H
-EOF
+TRACEPOINT_EOF
         log "Created stub tracepoint header"
     fi
     
@@ -464,7 +464,7 @@ validate_build() {
     local found_artifacts=0
     
     # Check for shared libraries
-    if compgen -G "$vbspro_build/*.so" > /dev/null || compgen -G "$install_dir/lib/*.so" > /dev/null; then
+    if compgen -G "$vbspro_build/*.so" > /dev/null 2>&1 || compgen -G "$install_dir/lib/*.so" > /dev/null 2>&1; then
         log "Found VBSPro shared libraries"
         find "$vbspro_build" "$install_dir" -name "*.so" 2>/dev/null | head -5 | while read -r lib; do
             log "  - $lib"
@@ -473,13 +473,13 @@ validate_build() {
     fi
     
     # Check for static libraries
-    if compgen -G "$vbspro_build/*.a" > /dev/null || compgen -G "$install_dir/lib/*.a" > /dev/null; then
+    if compgen -G "$vbspro_build/*.a" > /dev/null 2>&1 || compgen -G "$install_dir/lib/*.a" > /dev/null 2>&1; then
         log "Found VBSPro static libraries"
         ((found_artifacts++))
     fi
     
     # Check for executables
-    if compgen -G "$vbspro_build/vbs_*" > /dev/null || compgen -G "$install_dir/bin/vbs_*" > /dev/null; then
+    if compgen -G "$vbspro_build/vbs_*" > /dev/null 2>&1 || compgen -G "$install_dir/bin/vbs_*" > /dev/null 2>&1; then
         log "Found VBSPro executables"
         find "$vbspro_build" "$install_dir" -name "vbs_*" -type f 2>/dev/null | head -5 | while read -r exe; do
             log "  - $exe"
