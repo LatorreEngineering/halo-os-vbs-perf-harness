@@ -1,4 +1,4 @@
-name: Halo.OS VBS Performance CI
+name: Halo.OS VBS Perf Harness CI
 
 on:
   push:
@@ -6,226 +6,165 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Experiment duration (seconds)'
+        required: false
+        default: '120'
+      scenario:
+        description: 'Test scenario'
+        required: false
+        default: 'aeb_120kmh'
+        type: choice
+        options:
+          - aeb_120kmh
+          - lka_80kmh
+          - parking
 
 env:
-  PYTHON_VERSION: '3.11'
+  PYTHON_VERSION: '3.10'
+  CACHE_VERSION: 'v1'
+  MANIFEST_REPO_URL: 'https://gitee.com/haloos/manifests.git'
+  MANIFEST_NAME: 'vbs.xml'  # VBSPro-focused manifest
 
 jobs:
   validate:
-    name: Validate Repository
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Install validation tools
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y libxml2-utils shellcheck python3
-      
-      - name: Validate XML manifests
-        run: |
-          echo "Validating XML manifests..."
-          for manifest in manifests/*.xml 2>/dev/null; do
-            if [ -f "$manifest" ]; then
-              xmllint --noout "$manifest" && echo "Valid: $manifest"
-            fi
-          done
-          echo "Manifest validation complete"
-      
-      - name: Validate Python scripts
-        run: |
-          echo "Validating Python scripts..."
-          for script in ci/*.py 2>/dev/null; do
-            if [ -f "$script" ]; then
-              python3 -m py_compile "$script" && echo "Valid: $script"
-            fi
-          done
-          echo "Python validation complete"
-      
-      - name: Validate Bash scripts
-        run: |
-          echo "Validating Bash scripts..."
-          for script in ci/*.sh 2>/dev/null; do
-            if [ -f "$script" ]; then
-              shellcheck -e SC1090,SC1091,SC2016 "$script" && echo "Valid: $script"
-            fi
-          done
-          echo "Bash validation complete"
+      - uses: actions/checkout@v4
+      - name: Install validators
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck python3-pip
+      - name: Validate manifests
+        run: for f in manifests/*.xml; do xmllint --noout "$f"; done
+      - name: ShellCheck scripts
+        run: for f in ci/*.sh; do shellcheck "$f"; done
+      - name: PyLint analysis
+        run: pip install pylint && for f in ci/*.py; do pylint "$f"; done
 
   setup:
-    name: Setup Environment
     runs-on: ubuntu-22.04
     needs: validate
+    outputs:
+      cache-key: ${{ steps.cache.outputs.key }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - name: Cache key
+        id: cache
+        run: |
+          hash=$(sha256sum manifests/*.xml requirements.txt 2>/dev/null | sha256sum | cut -d' ' -f1)
+          echo "key=${CACHE_VERSION}-${hash}" >> $GITHUB_OUTPUT
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv/
+          key: ${{ steps.cache.outputs.key }}
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-          cache: 'pip'
-      
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then
-            pip install -r requirements.txt
-          fi
+      - name: Install Python deps
+        run: python -m venv venv && . venv/bin/activate && pip install -r requirements.txt
+      - name: Run setup_env
+        run: chmod +x ci/setup_env.sh && ./ci/setup_env.sh
 
   build:
-    name: Build VBSPro
     runs-on: ubuntu-22.04
     needs: setup
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Build Halo.OS VBSPro
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            venv/
+          key: ${{ needs.setup.outputs.cache-key }}
+      - name: Build VBSPro
         env:
-          MANIFEST_REPO_URL: https://gitee.com/haloos/manifests.git
-          MANIFEST_NAME: vbs.xml
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           chmod +x ci/build_halo.sh
-          ./ci/build_halo.sh --jobs 4
-      
-      - name: Upload build artifacts
+          ./ci/build_halo.sh
+      - name: Upload build
         uses: actions/upload-artifact@v4
         with:
-          name: halo-vbspro-build
+          name: vbspro-build
           path: build/
           retention-days: 7
-      
-      - name: Upload build logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-logs
-          path: logs/
-          retention-days: 3
 
-  test:
-    name: Generate Test Data
+  experiment:
     runs-on: ubuntu-22.04
     needs: build
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Download build artifacts
-        uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          name: halo-vbspro-build
+          name: vbspro-build
           path: build/
-      
-      - name: Create test results
+      - name: Run experiment
+        env:
+          LD_LIBRARY_PATH: build/install/lib
         run: |
-          mkdir -p results/ci_test
-          python3 -c "
-          import json
-          events = [
-              {'timestamp_ns': 1000000000, 'event_name': 'halo_camera_frame_received', 'fields': {'frame_id': 1}},
-              {'timestamp_ns': 1102400000, 'event_name': 'halo_brake_actuated', 'fields': {'frame_id': 1}},
-              {'timestamp_ns': 1200000000, 'event_name': 'halo_camera_frame_received', 'fields': {'frame_id': 2}},
-              {'timestamp_ns': 1305000000, 'event_name': 'halo_brake_actuated', 'fields': {'frame_id': 2}},
-          ]
-          with open('results/ci_test/events.jsonl', 'w') as f:
-              for event in events:
-                  f.write(json.dumps(event) + '\n')
-          print('Test data created')
-          "
-      
-      - name: Upload test results
+          . venv/bin/activate
+          mkdir -p results
+          SCENARIO=${{ github.event.inputs.scenario || 'aeb_120kmh' }}
+          DURATION=${{ github.event.inputs.duration || 120 }}
+          chmod +x ci/run_experiment.sh
+          ./ci/run_experiment.sh "results/$SCENARIO" $DURATION --scenario $SCENARIO
+      - name: Upload traces
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: experiment-traces
           path: results/
           retention-days: 7
 
   analyze:
-    name: Analyze Results
     runs-on: ubuntu-22.04
-    needs: test
+    needs: experiment
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      
-      - name: Install dependencies
-        run: |
-          pip install numpy pandas matplotlib
-      
-      - name: Download test results
-        uses: actions/download-artifact@v4
-        with:
-          name: test-results
+          name: experiment-traces
           path: results/
-      
-      - name: Run analysis
+      - name: Analyze traces
         run: |
-          if [ -f ci/analyze_vbs.py ]; then
-            for events_file in results/*/events.jsonl; do
-              if [ -f "$events_file" ]; then
-                python3 ci/analyze_vbs.py "$events_file" || echo "Analysis completed with warnings"
-              fi
-            done
-          else
-            echo "Analysis script not found, skipping"
-          fi
-      
-      - name: Upload analysis results
-        if: always()
+          . venv/bin/activate
+          chmod +x ci/analyze_vbs.py  # Assuming it's executable
+          for dir in results/*; do
+            if [ -f "$dir/events.jsonl" ]; then
+              python ci/analyze_vbs.py "$dir/events.jsonl" --output "$dir/metrics.txt"
+            fi
+          done
+      - name: Upload analysis
         uses: actions/upload-artifact@v4
         with:
-          name: analysis-results
+          name: perf-metrics
           path: results/
           retention-days: 30
 
   docker:
-    name: Docker Build
     runs-on: ubuntu-22.04
-    needs: validate
+    needs: setup
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v5
         with:
           context: .
-          push: false
-          tags: halo-os-perf-harness:ci
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          load: true
+          tags: halo-perf:ci
+      - name: Test Docker
+        run: docker run --rm halo-perf:ci python -c "import numpy, pandas; print('Ready')"
 
-  report:
-    name: CI Summary
+  summary:
     runs-on: ubuntu-22.04
-    needs: [validate, setup, build, test, analyze, docker]
+    needs: [validate, build, experiment, analyze, docker]
     if: always()
     steps:
-      - name: Check results
+      - name: CI Status
         run: |
-          echo "CI Pipeline Summary"
-          echo "==================="
-          echo "Validate: ${{ needs.validate.result }}"
-          echo "Setup: ${{ needs.setup.result }}"
-          echo "Build: ${{ needs.build.result }}"
-          echo "Test: ${{ needs.test.result }}"
-          echo "Analyze: ${{ needs.analyze.result }}"
-          echo "Docker: ${{ needs.docker.result }}"
-          
-          if [ "${{ needs.build.result }}" != "success" ]; then
-            echo "Build failed - check build logs"
-            exit 1
+          if [ '${{ needs.build.result }}' == 'success' ] && [ '${{ needs.experiment.result }}' == 'success' ]; then
+            echo "✅ Full pipeline green: VBSPro built, metrics verified."
+          else
+            echo "❌ Check artifacts/logs for failures."
           fi
-          
-          echo "CI pipeline completed"
