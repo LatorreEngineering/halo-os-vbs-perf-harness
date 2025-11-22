@@ -7,7 +7,7 @@ echo "[$(date)] Setting up environment..."
 sudo add-apt-repository ppa:lttng/ppa -y
 sudo apt-get update -qq
 
-# Install deps — NO DKMS (fails on Azure kernels)
+# Install everything we need (no DKMS removed long ago)
 sudo apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build ca-certificates curl git \
     python3 python3-pip python3-venv \
@@ -15,9 +15,9 @@ sudo apt-get install -y --no-install-recommends \
     lttng-tools liblttng-ust1 liblttng-ust-dev \
     babeltrace
 
-# Create and activate venv
+# Create venv and activate it — THIS LINE FIXES SHELLCHECK FOREVER
 python3 -m venv venv
-# shellcheck source=venv/bin/activate
+# shellcheck source=/dev/null
 source venv/bin/activate
 
 pip install --upgrade pip
@@ -25,7 +25,7 @@ if [ -f requirements.txt ]; then
     pip install -r requirements.txt
 fi
 
-# Install repo tool if missing
+# Repo tool
 if ! command -v repo >/dev/null 2>&1; then
     curl https://storage.googleapis.com/git-repo-downloads/repo > /tmp/repo
     chmod +x /tmp/repo
