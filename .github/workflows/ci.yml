@@ -23,19 +23,19 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  CACHE_VERSION: 'v5'
+  CACHE_VERSION: 'v6'
 
 jobs:
   validate:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install validation tools
+      - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck
-      - name: Validate XML manifests
-        run: for f in manifests/*.xml; do xmllint --noout "$f"; done || true
-      - name: ShellCheck scripts
-        run: for f in ci/*.sh; do shellcheck "$f"; done || true
+      - name: Validate XML
+        run: for f in manifests/*.xml; do xmllint --noout "$f" || exit 1; done
+      - name: ShellCheck
+        run: for f in ci/*.sh; do shellcheck "$f" || exit 1; done
 
   setup:
     runs-on: ubuntu-22.04
@@ -58,10 +58,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
-      - name: Install deps + venv
+      - name: Setup venv
         run: |
           python -m venv venv
-          . venv/bin/activate
+          source venv/bin/activate
           pip install --upgrade pip
           [ -f requirements.txt ] && pip install -r requirements.txt
       - name: Run setup_env.sh
@@ -106,7 +106,7 @@ jobs:
         env:
           LD_LIBRARY_PATH: build/install/lib:$LD_LIBRARY_PATH
         run: |
-          . venv/bin/activate
+          source venv/bin/activate
           mkdir -p results
           SCENARIO="${{ github.event.inputs.scenario || 'aeb_120kmh' }}"
           DURATION="${{ github.event.inputs.duration || '120' }}"
@@ -129,9 +129,9 @@ jobs:
         with:
           name: experiment-traces
           path: results/
-      - name: Analyze traces
+      - name: Analyze
         run: |
-          . venv/bin/activate
+          source venv/bin/activate
           for dir in results/*/; do
             f="$dir/events.jsonl"
             [ -f "$f" ] && python ci/analyze.py "$f" --output "$dir/metrics.json"
@@ -150,10 +150,13 @@ jobs:
     steps:
       - name: Final Status
         run: |
-          success() { [[ '${{ needs.$1.result }}' == 'success' || '${{ needs.$1.result }}' == 'skipped' ]]; }
+          success() {
+            result="${{ needs.$1.result }}"
+            [[ "$result" == "success" || "$result" == "skipped" ]]
+          }
           if success build && success experiment && success analyze; then
-            echo "FULL PIPELINE SUCCESS: Metrics generated!"
+            echo "FULL PIPELINE SUCCESS: VBSPro built and metrics generated!"
           else
-            echo "Pipeline has failures — check logs."
+            echo "Pipeline has failures — check logs above."
             exit 1
           fi
