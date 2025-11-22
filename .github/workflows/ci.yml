@@ -23,7 +23,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  CACHE_VERSION: 'v6'
+  CACHE_VERSION: 'v7'
 
 jobs:
   validate:
@@ -32,7 +32,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck
-      - name: Validate XML
+      - name: Validate manifests
         run: for f in manifests/*.xml; do xmllint --noout "$f" || exit 1; done
       - name: ShellCheck
         run: for f in ci/*.sh; do shellcheck "$f" || exit 1; done
@@ -150,11 +150,13 @@ jobs:
     steps:
       - name: Final Status
         run: |
-          success() {
-            result="${{ needs.$1.result }}"
-            [[ "$result" == "success" || "$result" == "skipped" ]]
-          }
-          if success build && success experiment && success analyze; then
+          if [[ \
+            "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" \
+          ]] && [[ \
+            "${{ needs.experiment.result }}" == "success" || "${{ needs.experiment.result }}" == "skipped" \
+          ]] && [[ \
+            "${{ needs.analyze.result }}" == "success" || "${{ needs.analyze.result }}" == "skipped" \
+          ]]; then
             echo "FULL PIPELINE SUCCESS: VBSPro built and metrics generated!"
           else
             echo "Pipeline has failures — check logs above."
