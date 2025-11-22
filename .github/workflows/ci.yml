@@ -60,7 +60,7 @@ jobs:
             shellcheck -e SC1090,SC1091 "$s"
           done
 
-  # 2️⃣ Setup environment, install repo tool and sync sources
+  # 2️⃣ Setup environment (install python, cache key, minimal tools, run setup_env.sh)
   setup:
     runs-on: ubuntu-22.04
     needs: validate
@@ -104,58 +104,22 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y git curl ca-certificates openssh-client
 
-      - name: Install repo tool
-        run: |
-          mkdir -p "${HOME}/.local/bin"
-          curl -sSfL https://storage.googleapis.com/git-repo-downloads/repo -o "${HOME}/.local/bin/repo"
-          chmod +x "${HOME}/.local/bin/repo"
-          echo "${HOME}/.local/bin" >> $GITHUB_PATH
-          echo "Repo version: $(repo --version || true)"
-
       - name: Run project-specific setup (setup_env.sh)
         run: |
           chmod +x ci/setup_env.sh
           ./ci/setup_env.sh
 
-      - name: Initialize and sync Halo.OS sources
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN || '' }}
-          GITEE_SSH_KEY: ${{ secrets.GITEE_SSH_KEY || '' }}
-          MANIFEST_REPO_URL: ${{ env.MANIFEST_REPO_URL }}
-          MANIFEST_NAME: ${{ env.MANIFEST_NAME }}
-        run: |
-          set -euo pipefail
-          mkdir -p halo-os-src
-          cd halo-os-src
+      # NOTE: We DO NOT repo init/sync here because jobs do not share files.
+      # Repo init and sync will be done in build_halo.sh (build job), which runs in a fresh runner.
 
-          # If an SSH key is provided in secrets, use SSH access (preferred for private repos).
-          if [[ -n "${GITEE_SSH_KEY:-}" ]]; then
-            echo "Using GITEE_SSH_KEY (SSH) for Gitee access"
-            mkdir -p ~/.ssh
-            printf '%s\n' "${GITEE_SSH_KEY}" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-            ssh-keyscan gitee.com >> ~/.ssh/known_hosts || true
-            export GIT_SSH_COMMAND='ssh -i ~/.ssh/id_rsa -o StrictHostKeyChecking=yes'
-            repo init -u git@gitee.com:haloos/manifests.git -m "${MANIFEST_NAME}"
-          elif [[ -n "${GITEE_TOKEN:-}" ]]; then
-            echo "Using GITEE_TOKEN (HTTPS) for Gitee access"
-            # Keep token only in environment; using it in URL is needed by repo
-            repo init -u "https://${GITEE_TOKEN}@gitee.com/haloos/manifests.git" -m "${MANIFEST_NAME}"
-          else
-            echo "Using public haloos/manifests (no auth)"
-            repo init -u "${MANIFEST_REPO_URL}" -m "${MANIFEST_NAME}"
-          fi
-
-          # Sync; try parallel then fallback
-          repo sync -j$(nproc) --fail-fast || repo sync -j1 --fail-fast
-
-  # 3️⃣ Build Halo.OS
+  # 3️⃣ Build Halo.OS (THIS job performs repo init/sync via ci/build_halo.sh)
   build:
     runs-on: ubuntu-22.04
     needs: setup
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Restore cache
         uses: actions/cache@v4
         with:
@@ -164,10 +128,16 @@ jobs:
             venv
             halo-os-src/.repo
           key: ${{ needs.setup.outputs.deps-cache-key }}
-      - name: Build Halo.OS
+
+      - name: Build Halo.OS (repo init/sync happens inside this script)
+        env:
+          # optional: these secrets are used by build_halo.sh if it needs to auth to Gitee
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN || '' }}
+          GITEE_SSH_KEY: ${{ secrets.GITEE_SSH_KEY || '' }}
         run: |
           chmod +x ci/build_halo.sh
           ./ci/build_halo.sh --jobs $(nproc)
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
