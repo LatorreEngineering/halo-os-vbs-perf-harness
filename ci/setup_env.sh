@@ -20,6 +20,7 @@ sudo apt-get install -y --no-install-recommends \
 
 # Python venv (for analysis)
 python3 -m venv venv
+# shellcheck disable=SC1091  # venv activate is dynamic; safe post-venv create
 . venv/bin/activate
 pip install --upgrade pip
 pip install -r ../requirements.txt  # Assumes pinned deps
