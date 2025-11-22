@@ -1,8 +1,8 @@
-cat > ci/analyze.py <<'EOF'
+cat > ci/analyze.py << 'EOF'
 #!/usr/bin/env python3
 """
-analyze.py – Halo.OS VBS performance trace analyzer
-Validates ~100 ms AEB latency, <3 ms jitter, 18–22 % NPU overhead
+analyze.py - Halo.OS VBS performance trace analyzer.
+Validates ~100 ms AEB latency, <3 ms jitter, 18-22 % NPU overhead.
 """
 
 import argparse
@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 
 
-def analyze_traces(jsonl_path: str, output_path: str = "metrics.json") -> None:
+def analyze_traces(jsonl_path, output_path="metrics.json"):
     try:
         df = pd.read_json(jsonl_path, lines=True)
         if df.empty:
@@ -21,65 +21,75 @@ def analyze_traces(jsonl_path: str, output_path: str = "metrics.json") -> None:
 
         df["ts"] = pd.to_datetime(df["timestamp"], unit="ns")
 
-        # Latency: camera_frame → brake_actuate
-        cam = df[df["event"] == "camera_frame"]["ts"]
-        brk = df[df["event"] == "brake_actuate"]["ts"]
+        # Latency: camera_frame -> brake_actuate
+        cam_mask = df["event"] == "camera_frame"
+        brk_mask = df["event"] == "brake_actuate"
+        cam_ts = df[cam_mask]["ts"].values
+        brk_ts = df[brk_mask]["ts"].values
 
         latencies_ms = []
-        if not cam.empty and not brk.empty:
-            cam_times = cam.values
-            brk_times = brk.values
+        if len(cam_ts) > 0 and len(brk_ts) > 0:
             j = 0
-            for t in cam_times:
-                while j < len(brk_times) and brk_times[j] <= t:
+            for t in cam_ts:
+                while j < len(brk_ts) and brk_ts[j] <= t:
                     j += 1
-                if j < len(brk_times):
-                    latencies_ms.append((brk_times[j] - t) / np.timedelta64(1, "ms"))
+                if j < len(brk_ts):
+                    latencies_ms.append((brk_ts[j] - t).total_seconds() * 1000)
 
         latency_series = pd.Series(latencies_ms)
-        latency_p50 = float(latency_series.median()) if not latency_series.empty else None
-        latency_p9999 = float(latency_series.quantile(0.9999)) if not latency_series.empty else None
+        latency_p50 = latency_series.median() if len(latency_series) > 0 else None
+        latency_p9999 = latency_series.quantile(0.9999) if len(latency_series) > 0 else None
         jitter_p9999 = (latency_p9999 - latency_p50) if latency_p50 is not None and latency_p9999 is not None else None
 
-        # NPU overhead
-        def duration(mask_start, mask_end):
-            starts = df[mask_start]
-            ends = df[mask_end]
-            if starts.empty or ends.empty:
-                return pd.Series(dtype="float64")
-            merged = pd.concat([
-                starts.set_index("task_id")["ts"],
-                ends.set_index("task_id")["ts"]
-            ], axis=1, keys=["start", "end"]).dropna()
-            return (merged["end"] - merged["start"]) / np.timedelta64(1, "us")
+        # NPU overhead: Simple mean delta (assume paired by order)
+        native_mask_start = df["event"] == "npu_native_start"
+        native_mask_end = df["event"] == "npu_native_end"
+        virt_mask_start = df["event"] == "npu_virt_start"
+        virt_mask_end = df["event"] == "npu_virt_end"
 
-        native_us = duration(df["event"] == "npu_native_start", df["event"] == "npu_native_end")
-        virt_us   = duration(df["event"] == "npu_virt_start",   df["event"] == "npu_virt_end")
+        native_times = []
+        if native_mask_start.sum() > 0 and native_mask_end.sum() > 0:
+            native_starts = df[native_mask_start]["ts"].values
+            native_ends = df[native_mask_end]["ts"].values
+            for i in range(min(len(native_starts), len(native_ends))):
+                native_times.append((native_ends[i] - native_starts[i]).total_seconds() * 1e6)  # us
+
+        virt_times = []
+        if virt_mask_start.sum() > 0 and virt_mask_end.sum() > 0:
+            virt_starts = df[virt_mask_start]["ts"].values
+            virt_ends = df[virt_mask_end]["ts"].values
+            for i in range(min(len(virt_starts), len(virt_ends))):
+                virt_times.append((virt_ends[i] - virt_starts[i]).total_seconds() * 1e6)  # us
 
         overhead_pct = None
-        if not native_us.empty and not virt_us.empty:
-            overhead_pct = (virt_us.mean() - native_us.mean()) / native_us.mean() * 100
+        if native_times and virt_times:
+            native_mean = np.mean(native_times)
+            virt_mean = np.mean(virt_times)
+            overhead_pct = ((virt_mean - native_mean) / native_mean) * 100 if native_mean > 0 else None
 
         metrics = {
-            "latency_p50_ms": latency_p50,
-            "latency_p99.99_ms": latency_p9999,
-            "jitter_p99.99_ms": jitter_p9999,
-            "npu_overhead_pct": overhead_pct,
+            "latency_p50_ms": float(latency_p50) if latency_p50 is not None else None,
+            "latency_p99.99_ms": float(latency_p9999) if latency_p9999 is not None else None,
+            "jitter_p99.99_ms": float(jitter_p9999) if jitter_p9999 is not None else None,
+            "npu_overhead_pct": float(overhead_pct) if overhead_pct is not None else None,
             "total_events": len(df),
             "analysis_timestamp": datetime.utcnow().isoformat() + "Z",
         }
 
         with open(output_path, "w") as f:
-            json.dump(metrics, f, indent=2)
+            json.dump(metrics, f, indent=2, default=str)
 
         print("Analysis complete:")
         for k, v in metrics.items():
-            print(f"  {k:25}: {v}")
+            print(f"  {k:20}: {v}")
 
     except Exception as e:
-        error = {"error": str(e), "analysis_timestamp": datetime.utcnow().isoformat() + "Z"}
+        error_metrics = {
+            "error": str(e),
+            "analysis_timestamp": datetime.utcnow().isoformat() + "Z",
+        }
         with open(output_path, "w") as f:
-            json.dump(error, f, indent=2)
+            json.dump(error_metrics, f, indent=2)
         print(f"Analysis failed: {e}")
 
 
@@ -90,7 +100,3 @@ if __name__ == "__main__":
     args = parser.parse_args()
     analyze_traces(args.jsonl, args.output)
 EOF
-
-git add ci/analyze.py
-git commit -m "fix: final working analyzer – validate now passes (confirmed green)"
-git push origin HEAD:main  # or create PR from fix/validate-green
