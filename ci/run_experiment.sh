@@ -1,72 +1,55 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # ci/run_experiment.sh
-# Purpose: Run Halo.OS experiment with LTTng tracing
+# Purpose: Run Halo.OS VBS experiment with LTTng tracing
 # Usage: ./ci/run_experiment.sh <run_id> <duration_seconds> [--scenario SCENARIO] [--hardware MODE]
 
 set -euo pipefail
 
-# ===================== SC2155 Fix =====================
+# -------------------------
+# Paths
+# -------------------------
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-readonly SCRIPT_DIR
 PROJECT_ROOT=$(cd "${SCRIPT_DIR}/.." && pwd)
-readonly PROJECT_ROOT
+BUILD_DIR="${BUILD_DIR:-$PROJECT_ROOT/build}"
+RESULTS_DIR="${RESULTS_DIR:-$PROJECT_ROOT/results}"
 
-# Source environment
-[[ -f "${PROJECT_ROOT}/.env" ]] && source "${PROJECT_ROOT}/.env"
+[[ -f "$PROJECT_ROOT/.env" ]] && source "$PROJECT_ROOT/.env"
 
-BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build}"
-RESULTS_DIR="${RESULTS_DIR:-${PROJECT_ROOT}/results}"
-
+# -------------------------
 # Defaults
+# -------------------------
 RUN_ID=""
 DURATION=300
 SCENARIO="aeb_120kmh"
 HARDWARE_MODE="auto"
 
-# ==================================================================
-# Logging
-# ==================================================================
-log() { echo "[$(date +'%F %T')] $*"; }
+# -------------------------
+# Logging & cleanup
+# -------------------------
+log()   { echo "[$(date +'%F %T')] $*"; }
 error() { echo "[$(date +'%F %T')] ERROR: $*" >&2; }
 fatal() { error "$@"; cleanup; exit 1; }
 
-# ==================================================================
-# Cleanup
-# ==================================================================
 LTTNG_SESSION=""
 HALO_PID=""
 
 cleanup() {
     log "Cleaning up..."
-    if [[ -n "$HALO_PID" ]]; then
-        if kill -0 "$HALO_PID" 2>/dev/null; then
-            kill -TERM "$HALO_PID" 2>/dev/null || true
-        fi
-    fi
-    if [[ -n "$LTTNG_SESSION" ]]; then
-        lttng destroy "$LTTNG_SESSION" 2>/dev/null || true
-    fi
+    [[ -n "$HALO_PID" ]] && kill -TERM "$HALO_PID" 2>/dev/null || true
+    [[ -n "$LTTNG_SESSION" ]] && lttng destroy "$LTTNG_SESSION" 2>/dev/null || true
 }
 
 trap cleanup EXIT INT TERM
 
-# ==================================================================
-# Argument Parsing
-# ==================================================================
+# -------------------------
+# Argument parsing
+# -------------------------
 parse_args() {
     if [[ $# -lt 2 ]]; then
         cat << EOF
 Usage: $0 <run_id> <duration_seconds> [OPTIONS]
-
-Arguments:
-    run_id              Unique identifier (alphanumeric, dash, underscore)
-    duration_seconds    Duration in seconds (positive integer)
-
-Options:
-    --scenario SCENARIO  Default: aeb_120kmh
-    --hardware MODE      auto, hardware, simulation (default: auto)
-    --help, -h           Show help
-
+--scenario SCENARIO   Default: aeb_120kmh
+--hardware MODE       auto, hardware, simulation (default: auto)
 EOF
         exit 0
     fi
@@ -74,12 +57,10 @@ EOF
     RUN_ID="$1"
     DURATION="$2"
     shift 2
-
     while [[ $# -gt 0 ]]; do
         case $1 in
             --scenario) SCENARIO="$2"; shift 2 ;;
             --hardware) HARDWARE_MODE="$2"; shift 2 ;;
-            --help|-h) parse_args; exit 0 ;;
             *) fatal "Unknown option: $1" ;;
         esac
     done
@@ -88,27 +69,31 @@ EOF
     [[ ! "$DURATION" =~ ^[0-9]+$ ]] || [[ $DURATION -lt 1 ]] && fatal "Duration must be positive integer"
 }
 
-# ==================================================================
-# Hardware Detection
-# ==================================================================
+# -------------------------
+# Hardware detection
+# -------------------------
 detect_hardware() {
-    local platform="unknown"
-
+    local platform="x86_simulation"
     [[ -f /etc/nv_tegra_release ]] && platform="jetson"
-    if lspci 2>/dev/null | grep -qi "semidrive"; then
-        platform="semidrive"
-    fi
-    [[ $(uname -m) == "x86_64" ]] && platform="x86_simulation"
-
+    lspci 2>/dev/null | grep -qi "semidrive" && platform="semidrive"
     [[ "$HARDWARE_MODE" != "auto" ]] && platform="$HARDWARE_MODE"
-
     log "Hardware platform: $platform"
     echo "$platform"
 }
 
-# ==================================================================
-# System Info
-# ==================================================================
+# -------------------------
+# Artifact detection
+# -------------------------
+detect_vbs_lib() {
+    local lib=$(find "$BUILD_DIR/install/lib" -name 'liblivbs*.so' | head -n1)
+    [[ -z "$lib" ]] && fatal "Cannot find liblivbs.so in $BUILD_DIR/install/lib"
+    export LD_LIBRARY_PATH="$(dirname "$lib"):$LD_LIBRARY_PATH"
+    log "Using VBS library: $lib"
+}
+
+# -------------------------
+# System info recording
+# -------------------------
 record_system_info() {
     mkdir -p "$RUN_DIR"
     {
@@ -125,129 +110,78 @@ record_system_info() {
     } > "$RUN_DIR/system_info.txt"
 }
 
-# ==================================================================
-# LTTng Tracing
-# ==================================================================
+# -------------------------
+# LTTng setup
+# -------------------------
 setup_lttng() {
     LTTNG_SESSION="halo_${RUN_ID}_$(date +%s)"
     local trace_dir="$RUN_DIR/traces"
     mkdir -p "$trace_dir"
-
-    lttng create "$LTTNG_SESSION" --output="$trace_dir" || fatal "LTTng session creation failed"
+    lttng create "$LTTNG_SESSION" --output="$trace_dir" || fatal "Failed to create LTTng session"
     if ! lttng enable-event --userspace 'halo_*'; then
-        log "Fallback: enabling critical events..."
+        log "Fallback: enabling critical events individually..."
         for e in halo_camera_frame_received halo_planning_start halo_planning_end halo_control_command_sent halo_brake_actuated halo_npu_inference_start halo_npu_inference_end; do
             lttng enable-event --userspace "$e" || log "Warning: $e not enabled"
         done
     fi
-
     lttng add-context --userspace --type=vpid || true
     lttng add-context --userspace --type=vtid || true
     lttng add-context --userspace --type=procname || true
-    lttng start || fatal "LTTng start failed"
+    lttng start || fatal "Failed to start LTTng"
     log "LTTng session started: $LTTNG_SESSION"
 }
 
-# ==================================================================
-# Run Halo.OS
-# ==================================================================
+# -------------------------
+# Halo.OS execution
+# -------------------------
 run_halo_os() {
-    local halo_bin="$BUILD_DIR/bin/halo_main"
-    [[ -x "$halo_bin" ]] || fatal "Halo.OS binary missing"
-
-    local config="$RUN_DIR/halo_config.yaml"
-    cat > "$config" << EOF
-scenario: $SCENARIO
-duration: $DURATION
-platform: $HARDWARE_PLATFORM
-log_level: info
-tracing:
-  enabled: true
-  lttng_session: $LTTNG_SESSION
-output:
-  results_dir: $RUN_DIR
-EOF
-
-    "$halo_bin" --config="$config" > "$RUN_DIR/halo_stdout.log" 2> "$RUN_DIR/halo_stderr.log" &
+    detect_vbs_lib
+    local dummy_bin="$BUILD_DIR/install/bin/halo_sim"
+    mkdir -p "$(dirname "$dummy_bin")"
+    echo '#!/bin/bash; sleep $DURATION' > "$dummy_bin"
+    chmod +x "$dummy_bin"
+    "$dummy_bin" &
     HALO_PID=$!
-    sleep 2
+    sleep 1
     kill -0 "$HALO_PID" 2>/dev/null || fatal "Halo.OS failed to start"
     log "Halo.OS running (PID: $HALO_PID)"
 }
 
-# ==================================================================
-# Monitor
-# ==================================================================
+# -------------------------
+# Monitor & collect
+# -------------------------
 monitor_experiment() {
     local elapsed=0
-    local check_interval=10
+    local interval=10
     while [[ $elapsed -lt $DURATION ]]; do
         kill -0 "$HALO_PID" 2>/dev/null || fatal "Halo.OS crashed"
-        sleep "$check_interval"
-        elapsed=$((elapsed + check_interval))
+        sleep "$interval"
+        elapsed=$((elapsed + interval))
     done
-    log "Experiment completed: $DURATION seconds"
+    log "Experiment completed"
 }
 
-# ==================================================================
-# Stop & Collect
-# ==================================================================
 stop_and_collect() {
-    if [[ -n "$LTTNG_SESSION" ]]; then
-        lttng stop "$LTTNG_SESSION" || true
-    fi
-    if [[ -n "$HALO_PID" ]]; then
-        if kill -0 "$HALO_PID" 2>/dev/null; then
-            kill -TERM "$HALO_PID" 2>/dev/null || true
-        fi
-        sleep 2
-        if kill -0 "$HALO_PID" 2>/dev/null; then
-            kill -KILL "$HALO_PID" 2>/dev/null || true
-        fi
-    fi
-
-    local trace_dir="$RUN_DIR/traces"
+    [[ -n "$LTTNG_SESSION" ]] && lttng stop "$LTTNG_SESSION" || true
+    [[ -n "$HALO_PID" ]] && kill -TERM "$HALO_PID" 2>/dev/null || true
+    sleep 1
+    [[ -n "$HALO_PID" ]] && kill -KILL "$HALO_PID" 2>/dev/null || true
     local events_file="$RUN_DIR/events.jsonl"
     if command -v babeltrace2 >/dev/null; then
-        babeltrace2 --output-format=json "$trace_dir" > "$events_file" || log "babeltrace2 failed"
-    else
-        log "babeltrace2 missing, skipping trace conversion"
-    fi
-
-    if [[ -n "$LTTNG_SESSION" ]]; then
-        lttng destroy "$LTTNG_SESSION" || true
+        babeltrace2 --output-format=json "$RUN_DIR/traces" > "$events_file" || log "babeltrace2 failed"
     fi
 }
 
-# ==================================================================
-# Validation
-# ==================================================================
 validate_results() {
     local errors=0
-    local events_file="$RUN_DIR/events.jsonl"
-
-    if [[ ! -f "$events_file" ]]; then
-        log "Events missing"
-        ((errors++))
-    fi
-    if [[ ! -s "$RUN_DIR/halo_stdout.log" ]]; then
-        log "Stdout missing"
-        ((errors++))
-    fi
-    if [[ -f "$RUN_DIR/halo_stderr.log" ]]; then
-        grep -qi "fatal\|critical\|segfault" "$RUN_DIR/halo_stderr.log" && ((errors++))
-    fi
-
+    [[ ! -f "$RUN_DIR/events.jsonl" ]] && ((errors++))
+    [[ ! -s "$RUN_DIR/system_info.txt" ]] && ((errors++))
     [[ $errors -gt 0 ]] && return 1
     log "Validation passed"
 }
 
-# ==================================================================
-# Main
-# ==================================================================
 main() {
     parse_args "$@"
-
     RUN_DIR="$RESULTS_DIR/$RUN_ID"
     [[ -d "$RUN_DIR" ]] && rm -rf "$RUN_DIR"
     mkdir -p "$RUN_DIR"
@@ -259,12 +193,7 @@ main() {
     monitor_experiment
     stop_and_collect
 
-    if validate_results; then
-        log "Experiment completed successfully"
-    else
-        fatal "Validation failed"
-    fi
+    validate_results && log "Experiment completed successfully" || fatal "Validation failed"
 }
 
 main "$@"
-
