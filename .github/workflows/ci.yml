@@ -23,7 +23,7 @@ on:
 
 env:
   PYTHON_VERSION: '3.10'
-  CACHE_VERSION: 'v4'
+  CACHE_VERSION: 'v4'  # Bump on dep changes
   MANIFEST_REPO_URL: 'https://gitee.com/haloos/manifests.git'
   MANIFEST_NAME: 'vbs.xml'
 
@@ -185,9 +185,10 @@ jobs:
     steps:
       - name: Final CI Status
         run: |
-          if [[ '${{ needs.build.result }}' == 'success' ]] && \
-             [[ '${{ needs.experiment.result }}' == 'success' ]] && \
-             [[ '${{ needs.analyze.result }}' == 'success' ]]; then
+          BUILD_OK=$( [[ '${{ needs.build.result }}' == 'success' ]] && echo true || echo false )
+          EXP_OK=$( [[ '${{ needs.experiment.result }}' == 'success' ]] && echo true || echo false )
+          ANALYZE_OK=$( [[ '${{ needs.analyze.result }}' == 'success' ]] && echo true || echo false )
+          if [[ $BUILD_OK == true ]] && [[ $EXP_OK == true ]] && [[ $ANALYZE_OK == true ]]; then
             echo "FULL PIPELINE SUCCESS: VBSPro built and metrics generated!"
           else
             echo "Some jobs failed — check artifacts and logs above."
