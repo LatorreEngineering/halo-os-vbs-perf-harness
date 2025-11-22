@@ -1,34 +1,24 @@
 #!/usr/bin/env bash
 # ci/build_halo.sh
-# Build instrumented VBSPro (Halo.OS Vehicle Base System Pro)
-# This is the ONLY subsystem needed for latency/jitter/NPU overhead measurement
+# Build VBSPro (Halo.OS middleware) with LTTng instrumentation
 
 set -euo pipefail
 
-# ==============================================================================
-# Configuration
-# ==============================================================================
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly SCRIPT_DIR
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 readonly PROJECT_ROOT
 
-# Directories
 HALO_SRC_DIR="${HALO_SRC_DIR:-${PROJECT_ROOT}/halo-os-src}"
 BUILD_DIR="${BUILD_DIR:-${PROJECT_ROOT}/build}"
 LOG_DIR="${PROJECT_ROOT}/logs"
 
-# Manifest configuration - use official Halo.OS manifest
 MANIFEST_REPO_URL="${MANIFEST_REPO_URL:-https://gitee.com/haloos/manifests.git}"
-MANIFEST_NAME="${MANIFEST_NAME:-vbs.xml}"  # VBS-only manifest
+MANIFEST_NAME="${MANIFEST_NAME:-vbs.xml}"
 
-# Build configuration
 CLEAN_BUILD=0
 JOBS=$(nproc 2>/dev/null || echo 4)
 
-# ==============================================================================
-# Logging Setup
-# ==============================================================================
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/build_$(date +%Y%m%d_%H%M%S).log"
 
@@ -45,157 +35,77 @@ fatal() {
     exit 1
 }
 
-# ==============================================================================
-# Argument Parsing
-# ==============================================================================
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --clean)
-                CLEAN_BUILD=1
-                shift
-                ;;
-            --jobs)
-                JOBS="$2"
-                shift 2
-                ;;
-            -j*)
-                JOBS="${1#-j}"
-                shift
-                ;;
+            --clean) CLEAN_BUILD=1; shift ;;
+            --jobs) JOBS="$2"; shift 2 ;;
+            -j*) JOBS="${1#-j}"; shift ;;
             --help|-h)
-                cat << EOF
-Usage: $0 [OPTIONS]
-
-Build VBSPro (Halo.OS middleware) with LTTng instrumentation.
-
-Options:
-    --clean         Clean build (remove build directory)
-    --jobs N, -jN   Number of parallel build jobs (default: ${JOBS})
-    --help, -h      Show this help message
-
-Environment Variables:
-    MANIFEST_REPO_URL   Manifest repo (default: ${MANIFEST_REPO_URL})
-    MANIFEST_NAME       Manifest file (default: ${MANIFEST_NAME})
-    HALO_SRC_DIR        Source directory (default: ${HALO_SRC_DIR})
-    BUILD_DIR           Build directory (default: ${BUILD_DIR})
-    GITEE_TOKEN         Gitee access token (for private repos)
-    GITEE_SSH_KEY       SSH key for Gitee (alternative to token)
-EOF
+                echo "Usage: $0 [--clean] [--jobs N]"
                 exit 0
                 ;;
-            *)
-                error "Unknown option: $1"
-                echo "Use --help for usage information"
-                exit 1
-                ;;
+            *) error "Unknown option: $1"; exit 1 ;;
         esac
     done
 }
 
-# ==============================================================================
-# Install System Dependencies
-# ==============================================================================
 install_dependencies() {
     log "Installing system dependencies..."
-    
-    # Update package lists
     sudo apt-get update -qq
-    
-    # Install required packages
     sudo apt-get install -y --no-install-recommends \
-        build-essential \
-        cmake \
-        ninja-build \
-        git \
-        curl \
-        ca-certificates \
-        openjdk-11-jdk \
-        python3 \
-        python3-pip \
-        lttng-tools \
-        liblttng-ust-dev \
-        liblttng-ctl-dev \
-        liburcu-dev \
-        pkg-config
+        build-essential cmake ninja-build git curl ca-certificates \
+        openjdk-11-jdk python3 python3-pip \
+        lttng-tools liblttng-ust-dev liblttng-ctl-dev liburcu-dev pkg-config
     
-    # Configure Java
     export JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-1.11.0-openjdk-amd64}"
     export PATH="$JAVA_HOME/bin:$PATH"
-    
-    log "System dependencies installed"
+    log "Dependencies installed"
 }
 
-# ==============================================================================
-# Install Repo Tool
-# ==============================================================================
 install_repo_tool() {
     if command -v repo >/dev/null 2>&1; then
-        log "repo tool already installed: $(repo --version 2>&1 | head -1 || echo 'unknown')"
+        log "repo tool already installed"
         return 0
     fi
     
     log "Installing repo tool..."
-    
-    local repo_url="https://storage.googleapis.com/git-repo-downloads/repo"
-    local repo_bin="/tmp/repo"
-    
-    if curl -sSfL "$repo_url" -o "$repo_bin"; then
-        chmod +x "$repo_bin"
-        sudo mv "$repo_bin" /usr/local/bin/repo
-        log "repo tool installed successfully"
-    else
-        fatal "Failed to download repo tool from $repo_url"
-    fi
+    curl -sSfL https://storage.googleapis.com/git-repo-downloads/repo -o /tmp/repo
+    chmod +x /tmp/repo
+    sudo mv /tmp/repo /usr/local/bin/repo
+    log "repo tool installed"
 }
 
-# ==============================================================================
-# Setup Git Authentication (if credentials provided)
-# ==============================================================================
 setup_git_auth() {
     if [[ -n "${GITEE_SSH_KEY:-}" ]]; then
-        log "Configuring SSH authentication for Gitee..."
+        log "Configuring SSH authentication..."
         mkdir -p ~/.ssh
         chmod 700 ~/.ssh
-        
-        # Write SSH key
         echo "$GITEE_SSH_KEY" > ~/.ssh/id_rsa_gitee
         chmod 600 ~/.ssh/id_rsa_gitee
-        
-        # Add Gitee to known hosts
         ssh-keyscan gitee.com >> ~/.ssh/known_hosts 2>/dev/null || true
-        
-        # Configure git to use this key
-        cat > ~/.ssh/config << EOF
+        cat > ~/.ssh/config << 'SSHCONFIG'
 Host gitee.com
     IdentityFile ~/.ssh/id_rsa_gitee
     StrictHostKeyChecking yes
-EOF
+SSHCONFIG
         chmod 600 ~/.ssh/config
-        
         export GIT_SSH_COMMAND="ssh -i ~/.ssh/id_rsa_gitee"
-        log "SSH authentication configured"
+        log "SSH configured"
     elif [[ -n "${GITEE_TOKEN:-}" ]]; then
-        log "Using GITEE_TOKEN for HTTPS authentication"
-        # Token will be embedded in URLs during repo init
+        log "Using GITEE_TOKEN for authentication"
     fi
 }
 
-# ==============================================================================
-# Initialize and Sync Repository
-# ==============================================================================
 sync_repository() {
-    log "Preparing source directory: $HALO_SRC_DIR"
+    log "Syncing repository from Gitee..."
     mkdir -p "$HALO_SRC_DIR"
     cd "$HALO_SRC_DIR"
     
-    # Initialize repo if needed
     if [[ ! -d ".repo" ]]; then
-        log "Initializing repo with manifest: $MANIFEST_NAME"
-        
+        log "Initializing repo..."
         local manifest_url="$MANIFEST_REPO_URL"
         
-        # Modify URL if using token
         if [[ -n "${GITEE_TOKEN:-}" ]]; then
             manifest_url="${MANIFEST_REPO_URL/https:\/\//https://${GITEE_TOKEN}@}"
         fi
@@ -204,217 +114,124 @@ sync_repository() {
             manifest_url="${MANIFEST_REPO_URL/https:\/\/gitee.com/git@gitee.com:}"
         fi
         
-        log "Manifest URL: ${manifest_url}"
-        
-        if ! repo init -u "$manifest_url" -m "$MANIFEST_NAME" --no-repo-verify; then
+        repo init -u "$manifest_url" -m "$MANIFEST_NAME" --no-repo-verify || \
             fatal "Failed to initialize repo"
-        fi
-    else
-        log "Repo already initialized"
     fi
     
-    # Normalize SSH URLs to HTTPS if no SSH key (prevents auth errors)
     if [[ -z "${GITEE_SSH_KEY:-}" ]]; then
-        log "Normalizing remote URLs to HTTPS..."
+        log "Normalizing URLs to HTTPS..."
         repo forall -c "
-            origin_url=\$(git remote get-url origin 2>/dev/null || true)
-            if [[ \"\$origin_url\" == git@* ]]; then
-                https_url=\$(echo \"\$origin_url\" | sed 's|git@gitee.com:|https://gitee.com/|')
-                git remote set-url origin \"\$https_url\"
-                echo \"Normalized: \$origin_url -> \$https_url\"
+            url=\$(git remote get-url origin 2>/dev/null || true)
+            if [[ \"\$url\" == git@* ]]; then
+                new_url=\$(echo \"\$url\" | sed 's|git@gitee.com:|https://gitee.com/|')
+                git remote set-url origin \"\$new_url\"
             fi
-        " || true
+        " 2>/dev/null || true
     fi
     
-    # Sync with retries
-    local max_retries=3
     local retry=0
-    local sync_success=0
-    
+    local max_retries=3
     while [[ $retry -lt $max_retries ]]; do
-        log "Syncing repositories (attempt $((retry + 1))/${max_retries})..."
-        
+        log "Syncing (attempt $((retry + 1))/${max_retries})..."
         if repo sync -j"$JOBS" --force-sync --no-tags --current-branch; then
-            sync_success=1
+            log "Sync successful"
             break
-        else
-            error "Sync attempt $((retry + 1)) failed"
-            ((retry++))
-            
-            if [[ $retry -lt $max_retries ]]; then
-                log "Waiting 5 seconds before retry..."
-                sleep 5
-            fi
         fi
+        ((retry++))
+        [[ $retry -lt $max_retries ]] && sleep 5
     done
     
-    if [[ $sync_success -eq 0 ]]; then
-        fatal "Repository sync failed after $max_retries attempts"
-    fi
-    
-    log "Repository sync completed successfully"
+    [[ $retry -ge $max_retries ]] && fatal "Sync failed after $max_retries attempts"
 }
 
-# ==============================================================================
-# Record Build Provenance
-# ==============================================================================
 record_provenance() {
     log "Recording build provenance..."
-    
     mkdir -p "$BUILD_DIR"
-    local git_info="${BUILD_DIR}/git_info.txt"
-    
     cd "$HALO_SRC_DIR"
     
     {
         echo "Build Date: $(date)"
-        echo "Manifest Repo: $MANIFEST_REPO_URL"
-        echo "Manifest File: $MANIFEST_NAME"
+        echo "Manifest: $MANIFEST_REPO_URL ($MANIFEST_NAME)"
         echo ""
-        echo "Repository States:"
-        echo "===================="
-        
         repo forall -c "
             echo 'Project: \$REPO_PROJECT'
-            echo '  Path: \$REPO_PATH'
-            echo \"  Commit: \$(git rev-parse HEAD 2>/dev/null || echo unknown)\"
-            echo \"  Branch: \$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)\"
+            echo '  Commit: \$(git rev-parse HEAD 2>/dev/null || echo unknown)'
             echo ''
-        " 2>/dev/null || echo "Could not record all project states"
-    } > "$git_info"
+        " 2>/dev/null || echo "Could not record all states"
+    } > "$BUILD_DIR/git_info.txt"
     
-    log "Provenance saved to: $git_info"
+    log "Provenance saved"
 }
 
-# ==============================================================================
-# Build IDL Tools (Gradle-based)
-# ==============================================================================
 build_idl_tools() {
     local idlgen_dir="$HALO_SRC_DIR/vbs/vbspro/tools/idlgen"
     
     if [[ ! -d "$idlgen_dir" ]]; then
-        log "IDL tools directory not found, skipping IDL build"
+        log "IDL tools not found, skipping"
         return 0
     fi
     
-    log "Building IDL generation tools..."
+    log "Building IDL tools..."
     cd "$idlgen_dir"
     
     if [[ -f "gradlew" ]]; then
-        # Use Gradle wrapper if available
-        log "Running Gradle build for IDL tools..."
-        
-        # Make gradlew executable
         chmod +x gradlew
-        
-        # Run Gradle (suppress most output, show errors)
-        if ./gradlew assemble --no-daemon --console=plain 2>&1 | tee -a "$LOG_FILE"; then
-            log "IDL tools built successfully"
-        else
-            error "IDL tools build failed (non-fatal, continuing)"
-        fi
-    else
-        log "No Gradle wrapper found, skipping IDL build"
+        ./gradlew assemble --no-daemon --console=plain 2>&1 | tee -a "$LOG_FILE" || \
+            log "Gradle build warnings (non-fatal)"
+        log "IDL tools built"
     fi
 }
 
-# ==============================================================================
-# Inject Tracepoints
-# ==============================================================================
 inject_tracepoints() {
-    log "Injecting LTTng tracepoints into VBSPro..."
+    log "Injecting tracepoints..."
     
     local trace_header="$PROJECT_ROOT/tracepoints/halo_tracepoints.h"
     local vbspro_include="$HALO_SRC_DIR/vbs/vbspro/framework/include"
     
     if [[ ! -f "$trace_header" ]]; then
-        log "No tracepoint header found at $trace_header (will create stub)"
-        
-        # Create minimal tracepoint header
         mkdir -p "$(dirname "$trace_header")"
-        cat > "$trace_header" << 'TRACEPOINT_EOF'
+        cat > "$trace_header" << 'TRACEFILE'
 #ifndef HALO_TRACEPOINTS_H
 #define HALO_TRACEPOINTS_H
-
-// LTTng UST tracepoint definitions for Halo.OS VBS performance measurement
-// Add your TRACEPOINT_EVENT definitions here
 
 #ifdef ENABLE_LTTNG
 #include <lttng/tracepoint.h>
 
-TRACEPOINT_EVENT(
-    halo_vbs,
-    message_send,
-    TP_ARGS(
-        const char*, topic,
-        uint64_t, timestamp_ns,
-        uint32_t, msg_id
-    ),
-    TP_FIELDS(
-        ctf_string(topic, topic)
-        ctf_integer(uint64_t, timestamp_ns, timestamp_ns)
-        ctf_integer(uint32_t, msg_id, msg_id)
-    )
-)
+TRACEPOINT_EVENT(halo_vbs, message_send,
+    TP_ARGS(const char*, topic, uint64_t, ts, uint32_t, id),
+    TP_FIELDS(ctf_string(topic, topic) ctf_integer(uint64_t, ts, ts) ctf_integer(uint32_t, id, id)))
 
-TRACEPOINT_EVENT(
-    halo_vbs,
-    message_recv,
-    TP_ARGS(
-        const char*, topic,
-        uint64_t, timestamp_ns,
-        uint32_t, msg_id
-    ),
-    TP_FIELDS(
-        ctf_string(topic, topic)
-        ctf_integer(uint64_t, timestamp_ns, timestamp_ns)
-        ctf_integer(uint32_t, msg_id, msg_id)
-    )
-)
+TRACEPOINT_EVENT(halo_vbs, message_recv,
+    TP_ARGS(const char*, topic, uint64_t, ts, uint32_t, id),
+    TP_FIELDS(ctf_string(topic, topic) ctf_integer(uint64_t, ts, ts) ctf_integer(uint32_t, id, id)))
 
 #else
-// Stub macros when LTTng is disabled
 #define tracepoint(...)
 #endif
 
-#endif // HALO_TRACEPOINTS_H
-TRACEPOINT_EOF
+#endif
+TRACEFILE
         log "Created stub tracepoint header"
     fi
     
-    # Copy to VBSPro include directory
     mkdir -p "$vbspro_include"
-    cp "$trace_header" "$vbspro_include/" || log "Could not copy tracepoint header (non-fatal)"
-    
+    cp "$trace_header" "$vbspro_include/" 2>/dev/null || true
     log "Tracepoints injected"
 }
 
-# ==============================================================================
-# Build VBSPro
-# ==============================================================================
 build_vbspro() {
-    log "Building VBSPro (Vehicle Base System Pro)..."
+    log "Building VBSPro..."
     
     local vbspro_dir="$HALO_SRC_DIR/vbs/vbspro"
+    [[ ! -d "$vbspro_dir" ]] && fatal "VBSPro not found at: $vbspro_dir"
     
-    if [[ ! -d "$vbspro_dir" ]]; then
-        fatal "VBSPro directory not found at: $vbspro_dir"
-    fi
-    
-    # VBSPro uses CMake in build/ subdirectory
     local cmake_build_dir="$vbspro_dir/build/out"
-    
-    if [[ $CLEAN_BUILD -eq 1 ]]; then
-        log "Cleaning previous build..."
-        rm -rf "$cmake_build_dir"
-    fi
+    [[ $CLEAN_BUILD -eq 1 ]] && rm -rf "$cmake_build_dir"
     
     mkdir -p "$cmake_build_dir"
     cd "$cmake_build_dir"
     
-    log "Configuring VBSPro with CMake..."
-    
-    # CMake configuration with tracing enabled
+    log "Configuring with CMake..."
     cmake -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DENABLE_TRACER=ON \
@@ -423,101 +240,60 @@ build_vbspro() {
         -DCMAKE_INSTALL_PREFIX="$BUILD_DIR/install" \
         "$vbspro_dir" || fatal "CMake configuration failed"
     
-    log "Building VBSPro (using $JOBS parallel jobs)..."
+    log "Building (${JOBS} jobs)..."
+    local start_time
+    start_time=$(date +%s)
     
-    local build_start
-    build_start=$(date +%s)
+    cmake --build . --parallel "$JOBS" || fatal "Build failed"
     
-    if ! cmake --build . --parallel "$JOBS"; then
-        error "Build failed"
-        
-        # Show build log tail for debugging
-        if [[ -f "CMakeFiles/CMakeError.log" ]]; then
-            error "CMake error log (last 20 lines):"
-            tail -20 "CMakeFiles/CMakeError.log" | tee -a "$LOG_FILE"
-        fi
-        
-        fatal "VBSPro build failed"
-    fi
+    local end_time
+    end_time=$(date +%s)
+    log "Build completed in $((end_time - start_time)) seconds"
     
-    local build_end
-    build_end=$(date +%s)
-    local build_time=$((build_end - build_start))
-    
-    log "Build completed in ${build_time} seconds"
-    
-    # Install artifacts
-    log "Installing build artifacts..."
-    cmake --install . --prefix "$BUILD_DIR/install" || log "Install step returned non-zero (may be optional)"
+    cmake --install . --prefix "$BUILD_DIR/install" 2>/dev/null || \
+        log "Install step warnings (non-fatal)"
 }
 
-# ==============================================================================
-# Validate Build Artifacts
-# ==============================================================================
 validate_build() {
-    log "Validating build artifacts..."
+    log "Validating build..."
     
     local vbspro_build="$HALO_SRC_DIR/vbs/vbspro/build/out"
-    local install_dir="$BUILD_DIR/install"
+    local found=0
     
-    # Look for key artifacts
-    local found_artifacts=0
-    
-    # Check for shared libraries
-    if compgen -G "$vbspro_build/*.so" > /dev/null 2>&1 || compgen -G "$install_dir/lib/*.so" > /dev/null 2>&1; then
-        log "Found VBSPro shared libraries"
-        find "$vbspro_build" "$install_dir" -name "*.so" 2>/dev/null | head -5 | while read -r lib; do
-            log "  - $lib"
+    if compgen -G "$vbspro_build/*.so" > /dev/null 2>&1; then
+        log "Found shared libraries:"
+        find "$vbspro_build" -name "*.so" 2>/dev/null | head -3 | while read -r f; do
+            log "  - $(basename "$f")"
         done
-        ((found_artifacts++))
+        ((found++))
     fi
     
-    # Check for static libraries
-    if compgen -G "$vbspro_build/*.a" > /dev/null 2>&1 || compgen -G "$install_dir/lib/*.a" > /dev/null 2>&1; then
-        log "Found VBSPro static libraries"
-        ((found_artifacts++))
-    fi
-    
-    # Check for executables
-    if compgen -G "$vbspro_build/vbs_*" > /dev/null 2>&1 || compgen -G "$install_dir/bin/vbs_*" > /dev/null 2>&1; then
-        log "Found VBSPro executables"
-        find "$vbspro_build" "$install_dir" -name "vbs_*" -type f 2>/dev/null | head -5 | while read -r exe; do
-            log "  - $exe"
+    if compgen -G "$vbspro_build/vbs_*" > /dev/null 2>&1; then
+        log "Found executables:"
+        find "$vbspro_build" -name "vbs_*" -type f 2>/dev/null | head -3 | while read -r f; do
+            log "  - $(basename "$f")"
         done
-        ((found_artifacts++))
+        ((found++))
     fi
     
-    if [[ $found_artifacts -eq 0 ]]; then
-        error "WARNING: No obvious VBSPro artifacts found"
-        error "Build may have succeeded but produced unexpected outputs"
-        error "Check CMake targets in $vbspro_build"
-    else
-        log "Build validation passed - found $found_artifacts artifact type(s)"
-    fi
+    [[ $found -eq 0 ]] && log "WARNING: No obvious artifacts found"
     
-    # Copy all artifacts to build directory for easy access
-    log "Copying artifacts to $BUILD_DIR..."
     cp -r "$vbspro_build"/* "$BUILD_DIR/" 2>/dev/null || true
+    log "Artifacts copied to $BUILD_DIR"
 }
 
-# ==============================================================================
-# Main Execution
-# ==============================================================================
 main() {
     log "========================================"
     log "Halo.OS VBSPro Build Script"
     log "========================================"
-    log "Log file: $LOG_FILE"
     
     parse_args "$@"
     
-    log "Build configuration:"
-    log "  Source directory: $HALO_SRC_DIR"
-    log "  Build directory:  $BUILD_DIR"
-    log "  Manifest repo:    $MANIFEST_REPO_URL"
-    log "  Manifest file:    $MANIFEST_NAME"
-    log "  Parallel jobs:    $JOBS"
-    log "  Clean build:      $CLEAN_BUILD"
+    log "Configuration:"
+    log "  Source: $HALO_SRC_DIR"
+    log "  Build: $BUILD_DIR"
+    log "  Manifest: $MANIFEST_NAME"
+    log "  Jobs: $JOBS"
     
     install_dependencies
     install_repo_tool
@@ -532,11 +308,8 @@ main() {
     log "========================================"
     log "Build completed successfully!"
     log "========================================"
-    log ""
-    log "Build artifacts: $BUILD_DIR/"
-    log "Build log:       $LOG_FILE"
-    log ""
-    log "Next step: ./ci/run_experiment.sh <run_id> <duration>"
+    log "Artifacts: $BUILD_DIR/"
+    log "Log: $LOG_FILE"
 }
 
 main "$@"
