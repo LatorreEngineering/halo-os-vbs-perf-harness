@@ -7,7 +7,7 @@ echo "[$(date)] Setting up environment..."
 sudo add-apt-repository ppa:lttng/ppa -y
 sudo apt-get update -qq
 
-# Install everything EXCEPT lttng-modules-dkms (fails on Azure kernels)
+# Install deps — NO lttng-modules-dkms (fails on Azure kernels)
 sudo apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build ca-certificates curl git \
     python3 python3-pip python3-venv \
@@ -15,14 +15,18 @@ sudo apt-get install -y --no-install-recommends \
     lttng-tools liblttng-ust1 liblttng-ust-dev \
     babeltrace
 
-# Python venv
+# Create and activate venv
 python3 -m venv venv
-. venv/bin/activate
-pip install --upgrade pip
-[ -f requirements.txt ] && pip install -r requirements.txt || true
+# shellcheck source=/dev/null
+source venv/bin/activate
 
-# Repo tool
-if ! command -v repo >/dev/null; then
+pip install --upgrade pip
+if [ -f requirements.txt ]; then
+    pip install -r requirements.txt
+fi
+
+# Install repo tool if missing
+if ! command -v repo >/dev/null 2>&1; then
     curl https://storage.googleapis.com/git-repo-downloads/repo > /tmp/repo
     chmod +x /tmp/repo
     sudo mv /tmp/repo /usr/local/bin/repo
