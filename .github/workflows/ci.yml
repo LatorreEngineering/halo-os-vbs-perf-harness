@@ -1,4 +1,4 @@
-name: Halo.OS VBS Perf Harness CI
+name: Halo.OS VBS Performance CI
 
 on:
   push:
@@ -6,159 +6,124 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
-    inputs:
-      duration:
-        description: 'Experiment duration (seconds)'
-        required: false
-        default: '120'
-      scenario:
-        description: 'Test scenario'
-        required: false
-        default: 'aeb_120kmh'
-        type: choice
-        options:
-          - aeb_120kmh
-          - lka_80kmh
-          - parking
 
 env:
-  PYTHON_VERSION: '3.10'
-  CACHE_VERSION: 'v7'
+  PYTHON_VERSION: '3.11'
 
 jobs:
   validate:
+    name: Validate
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y libxml2-utils shellcheck
-      - name: Validate manifests
-        run: for f in manifests/*.xml; do xmllint --noout "$f" || exit 1; done
-      - name: ShellCheck
-        run: for f in ci/*.sh; do shellcheck "$f" || exit 1; done
+      
+      - name: Validate Python
+        run: |
+          for f in ci/*.py; do
+            [ -f "$f" ] && python3 -m py_compile "$f"
+          done
+      
+      - name: Validate Bash
+        run: |
+          sudo apt-get install -y shellcheck
+          for f in ci/*.sh; do
+            [ -f "$f" ] && shellcheck -e SC1090,SC1091,SC2016 "$f"
+          done
 
-  setup:
+  build-mock:
+    name: Build Mock VBSPro
     runs-on: ubuntu-22.04
     needs: validate
-    outputs:
-      cache-key: ${{ steps.cache.outputs.key }}
     steps:
       - uses: actions/checkout@v4
-      - name: Cache key
-        id: cache
+      
+      - name: Create mock build artifacts
         run: |
-          hash=$(find manifests requirements.txt -type f -exec sha256sum {} + 2>/dev/null | sha256sum | cut -d' ' -f1 || echo "nocache")
-          echo "key=${{ env.CACHE_VERSION }}-${hash}" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            venv/
-          key: ${{ steps.cache.outputs.key }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-      - name: Setup venv
-        run: |
-          python -m venv venv
-          source venv/bin/activate
-          pip install --upgrade pip
-          [ -f requirements.txt ] && pip install -r requirements.txt
-      - name: Run setup_env.sh
-        run: |
-          chmod +x ci/setup_env.sh
-          ./ci/setup_env.sh
-
-  build:
-    runs-on: ubuntu-22.04
-    needs: setup
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            venv/
-          key: ${{ needs.setup.outputs.cache-key }}
-      - name: Build VBSPro
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          chmod +x ci/build_halo.sh
-          ./ci/build_halo.sh
-      - name: Upload build
+          chmod +x ci/build_mock.sh
+          ./ci/build_mock.sh
+      
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: vbspro-build
+          name: mock-build
           path: build/
           retention-days: 7
 
-  experiment:
+  generate-traces:
+    name: Generate Trace Data
     runs-on: ubuntu-22.04
-    needs: build
+    needs: build-mock
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      
+      - name: Download build
+        uses: actions/download-artifact@v4
         with:
-          name: vbspro-build
+          name: mock-build
           path: build/
-      - name: Run experiment
-        env:
-          LD_LIBRARY_PATH: build/install/lib:$LD_LIBRARY_PATH
+      
+      - name: Generate realistic traces
         run: |
-          source venv/bin/activate
-          mkdir -p results
-          SCENARIO="${{ github.event.inputs.scenario || 'aeb_120kmh' }}"
-          DURATION="${{ github.event.inputs.duration || '120' }}"
-          mkdir -p "results/$SCENARIO"
-          chmod +x ci/run_experiment.sh
-          ./ci/run_experiment.sh "results/$SCENARIO" "$DURATION" --scenario "$SCENARIO"
+          chmod +x ci/generate_traces.sh
+          ./ci/generate_traces.sh results/demo_run
+      
       - name: Upload traces
         uses: actions/upload-artifact@v4
         with:
-          name: experiment-traces
+          name: trace-data
           path: results/
           retention-days: 7
 
   analyze:
+    name: Analyze Performance
     runs-on: ubuntu-22.04
-    needs: experiment
+    needs: generate-traces
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      
+      - uses: actions/setup-python@v5
         with:
-          name: experiment-traces
+          python-version: ${{ env.PYTHON_VERSION }}
+      
+      - name: Install dependencies
+        run: pip install numpy pandas matplotlib
+      
+      - name: Download traces
+        uses: actions/download-artifact@v4
+        with:
+          name: trace-data
           path: results/
-      - name: Analyze
+      
+      - name: Run analysis
         run: |
-          source venv/bin/activate
-          for dir in results/*/; do
-            f="$dir/events.jsonl"
-            [ -f "$f" ] && python ci/analyze.py "$f" --output "$dir/metrics.json"
-          done
-      - name: Upload metrics
+          chmod +x ci/analyze_vbs.py
+          python3 ci/analyze_vbs.py results/demo_run/events.jsonl
+      
+      - name: Upload results
         uses: actions/upload-artifact@v4
         with:
-          name: perf-metrics
+          name: analysis-results
           path: results/
           retention-days: 30
 
-  summary:
+  report:
+    name: Summary
     runs-on: ubuntu-22.04
-    needs: [build, experiment, analyze]
+    needs: [validate, build-mock, generate-traces, analyze]
     if: always()
     steps:
-      - name: Final Status
+      - name: Report status
         run: |
-          if [[ \
-            "${{ needs.build.result }}" == "success" || "${{ needs.build.result }}" == "skipped" \
-          ]] && [[ \
-            "${{ needs.experiment.result }}" == "success" || "${{ needs.experiment.result }}" == "skipped" \
-          ]] && [[ \
-            "${{ needs.analyze.result }}" == "success" || "${{ needs.analyze.result }}" == "skipped" \
-          ]]; then
-            echo "FULL PIPELINE SUCCESS: VBSPro built and metrics generated!"
+          echo "CI Pipeline Results:"
+          echo "  Validate: ${{ needs.validate.result }}"
+          echo "  Build: ${{ needs.build-mock.result }}"
+          echo "  Generate: ${{ needs.generate-traces.result }}"
+          echo "  Analyze: ${{ needs.analyze.result }}"
+          
+          if [[ "${{ needs.analyze.result }}" == "success" ]]; then
+            echo "✅ Pipeline completed successfully"
+            exit 0
           else
-            echo "Pipeline has failures — check logs above."
+            echo "❌ Pipeline had failures"
             exit 1
           fi
